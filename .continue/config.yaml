@@ -1,0 +1,13 @@
+name: dokploy-manager
+version: 1.0.0
+schema: v1
+
+# Project-local config. Inherits models + context from ~/.continue/config.yaml.
+# Adds project-specific rules. MCP servers are picked up automatically from
+# .continue/mcpServers/ — dokploy.json is a template that reads
+# DOKPLOY_BASE_URL / DOKPLOY_API_KEY from the environment, so neither this
+# file nor the MCP config need to contain secrets.
+
+rules:
+  - uses: file://./.continue/rules/dokploy-api-quirks.md
+  - uses: file://./.continue/rules/project-conventions.md

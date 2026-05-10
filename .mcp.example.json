@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "dokploy-manager": {
+      "command": "node",
+      "args": ["src/index.js"],
+      "cwd": "/absolute/path/to/dokploy-manager",
+      "env": {
+        "_comment_single_instance": "For a single Dokploy install, use these two vars:",
+        "DOKPLOY_BASE_URL": "https://your-dokploy-host.example.com/api",
+        "DOKPLOY_API_KEY": "your-api-key-here",
+
+        "_comment_multi_instance": "For multiple Dokploy installs, use DOKPLOY_INSTANCES (JSON string). When set, the single-instance vars above are ignored.",
+        "DOKPLOY_INSTANCES": "[{\"name\":\"main\",\"baseUrl\":\"https://dokploy-a.example.com/api\",\"apiKey\":\"key-a\"},{\"name\":\"staging\",\"baseUrl\":\"https://dokploy-b.example.com/api\",\"apiKey\":\"key-b\"}]",
+        "DOKPLOY_DEFAULT_INSTANCE": "main"
+      }
+    }
+  }
+}

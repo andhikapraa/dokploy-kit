@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "dokploy-manager": {
+      "command": "node",
+      "args": ["src/index.js"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "DOKPLOY_BASE_URL": "${env:DOKPLOY_BASE_URL}",
+        "DOKPLOY_API_KEY": "${env:DOKPLOY_API_KEY}"
+      }
+    }
+  }
+}

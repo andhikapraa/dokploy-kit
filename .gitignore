@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Local MCP config (contains live API keys)
+.mcp.json
+.mcp.*.json
+!.mcp.example.json
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Local backups / exports (may contain secrets)
+backup-*.json
+archive/
+
+# Credentials / keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+
+# Local databases / dumps
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.dump
+
+# Editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+*.swp

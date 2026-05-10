@@ -1,0 +1,27 @@
+{
+  "name": "dokploy-manager",
+  "version": "1.0.0",
+  "description": "MCP server for managing Dokploy infrastructure via API",
+  "main": "src/index.js",
+  "bin": {
+    "dokploy-manager": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/run-tests.js",
+    "verify": "node test/verify-tools.js",
+    "parse": "node scripts/parse-spec.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andhikapraa/dokploy-manager"
+  },
+  "keywords": ["dokploy", "mcp", "deployment", "infrastructure", "model-context-protocol", "claude"],
+  "author": "Muhammad Andhika Prasetya",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "zod": "^4.3.6"
+  }
+}
