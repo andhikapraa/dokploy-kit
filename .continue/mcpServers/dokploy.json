@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "dokploy-manager": {
+    "dokploy-mcp": {
       "command": "node",
       "args": ["src/index.js"],
       "cwd": "${workspaceFolder}",

@@ -1,6 +1,6 @@
 ---
-name: dokploy-manager Conventions
-description: Codebase conventions for the dokploy-manager MCP server
+name: dokploy-mcp Conventions
+description: Codebase conventions for the dokploy-mcp MCP server
 ---
 
 This repo is an MCP server exposing the Dokploy API as grouped tools

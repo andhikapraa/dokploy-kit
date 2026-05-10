@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "dokploy-manager": {
+    "dokploy-mcp": {
       "command": "node",
       "args": ["src/index.js"],
-      "cwd": "/absolute/path/to/dokploy-manager",
+      "cwd": "/absolute/path/to/dokploy-mcp",
       "env": {
         "_comment_single_instance": "For a single Dokploy install, use these two vars:",
         "DOKPLOY_BASE_URL": "https://your-dokploy-host.example.com/api",

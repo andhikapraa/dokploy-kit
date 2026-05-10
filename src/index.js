@@ -89,7 +89,7 @@ async function main() {
 
   // Create MCP server
   const server = new McpServer({
-    name: 'dokploy-manager',
+    name: 'dokploy-mcp',
     version: '1.0.0',
   });
 

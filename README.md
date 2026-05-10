@@ -1,4 +1,4 @@
-# dokploy-manager
+# dokploy-mcp
 
 > A Model Context Protocol (MCP) server that wraps the [Dokploy](https://dokploy.com) API, exposing **524 endpoints across 48 grouped tools** so AI agents like Claude Code can deploy apps, manage databases, configure domains, and operate Dokploy infrastructure conversationally.
 
@@ -21,8 +21,8 @@ The Dokploy REST API has ~500 endpoints — too many to register as individual M
 ### 1. Install
 
 ```bash
-git clone https://github.com/andhikapraa/dokploy-manager
-cd dokploy-manager
+git clone https://github.com/andhikapraa/dokploy-mcp
+cd dokploy-mcp
 npm install
 ```
 
@@ -38,10 +38,10 @@ Copy `.mcp.example.json` to `.mcp.json` (Claude Code auto-loads it from a projec
 ```json
 {
   "mcpServers": {
-    "dokploy-manager": {
+    "dokploy-mcp": {
       "command": "node",
       "args": ["src/index.js"],
-      "cwd": "/absolute/path/to/dokploy-manager",
+      "cwd": "/absolute/path/to/dokploy-mcp",
       "env": {
         "DOKPLOY_BASE_URL": "https://your-dokploy-host/api",
         "DOKPLOY_API_KEY": "your-key"

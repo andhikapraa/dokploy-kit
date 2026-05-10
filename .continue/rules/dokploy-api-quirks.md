@@ -3,7 +3,7 @@ name: Dokploy API Quirks
 description: Non-obvious behaviors of the Dokploy REST API
 ---
 
-When working with the Dokploy API or the dokploy-manager MCP server, apply these
+When working with the Dokploy API or the dokploy-mcp MCP server, apply these
 known quirks — they are not in the OpenAPI spec and have caused bugs before:
 
 - **Auth uses the `x-api-key` header.** Bearer auth is rejected by Dokploy.
