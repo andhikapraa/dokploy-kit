@@ -1,0 +1,36 @@
+.continue/rules/dokploy-api-quirks.md
+  s_db58330c550dd1::t_bf5096900a8c9a 6
+.mcp.example.json
+  s_db58330c550dd1::t_cebee82fc75478 3,6
+.continue/config.yaml
+  s_db58330c550dd1::t_3eeac8c1c56879 1
+package.json
+  s_db58330c550dd1::t_4dd9c20b54f66c 2,7,17
+src/index.js
+  s_db58330c550dd1::t_b9c51a91be5e73 92
+.continue/mcpServers/dokploy.json
+  s_db58330c550dd1::t_cf4cc457797c83 3
+.continue/rules/project-conventions.md
+  s_db58330c550dd1::t_d6e7cc687123a5 2-3
+README.md
+  s_db58330c550dd1::t_9365f01fc61d7f 24
+  s_db58330c550dd1::t_fca198d3146dcc 1
+  s_db58330c550dd1::t_a5678ede7d2dc4 25
+  s_db58330c550dd1::t_4de0ff326af998 41,44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "66a2594b5e8ffc30e88fc64a07ff0a5760381dfd",
+  "prompts": {},
+  "sessions": {
+    "s_db58330c550dd1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b274705a-1a68-405a-aa49-27f44ffa4a1d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
