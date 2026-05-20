@@ -42,13 +42,40 @@ function openApiToZod(prop, required = false, depth = 0) {
       const isNullable = variants.some(v => v.type === 'null');
 
       if (nonNull.length === 0) {
-        schema = z.any();
+        // Pure null or empty — emit a typed permissive schema for Vertex compatibility.
+        schema = z.record(z.string(), z.any());
       } else if (nonNull.length === 1) {
-        schema = openApiToZod(nonNull[0], true, depth + 1);
+        // If the non-null variant is an empty schema ({}), it's "any JSON".
+        // Emit a typed record so downstream JSON Schema consumers (e.g. Vertex AI)
+        // that require an explicit `type` field don't reject the function declaration.
+        const v = nonNull[0];
+        const isEmptySchema = v && typeof v === 'object'
+          && !v.type && !v.properties && !v.enum
+          && !v.anyOf && !v.oneOf && !v.items && !v.additionalProperties;
+        if (isEmptySchema) {
+          schema = z.record(z.string(), z.any());
+        } else {
+          schema = openApiToZod(v, true, depth + 1);
+        }
         if (isNullable) schema = schema.nullable();
       } else {
-        // Multiple non-null types — use z.any() for safety
-        schema = z.any();
+        // Multiple non-null types — if they're all simple primitives sharing a base
+        // type (e.g. string-with-pattern + string-const), pick the more permissive.
+        // Otherwise fall back to a typed record so Vertex AI accepts the schema.
+        const allString = nonNull.every(v => v.type === 'string');
+        const allNumber = nonNull.every(v => v.type === 'number' || v.type === 'integer');
+        const allBoolean = nonNull.every(v => v.type === 'boolean');
+        if (allString) {
+          schema = z.string();
+        } else if (allNumber) {
+          schema = z.number();
+        } else if (allBoolean) {
+          schema = z.boolean();
+        } else {
+          // Heterogeneous union — emit a typed record (not z.any() which renders
+          // as `{}` and is rejected by strict JSON Schema validators).
+          schema = z.record(z.string(), z.any());
+        }
         if (isNullable) schema = schema.nullable();
       }
     } else if (prop.enum) {
@@ -99,12 +126,14 @@ function openApiToZod(prop, required = false, depth = 0) {
           }
           break;
         default:
-          schema = z.any();
+          // Unknown/missing type — emit a typed permissive schema so strict
+          // JSON Schema validators (e.g. Vertex AI) don't reject the tool.
+          schema = z.record(z.string(), z.any());
       }
     }
   } catch (e) {
     // Fallback for any schema that can't be converted
-    schema = z.any();
+    schema = z.record(z.string(), z.any());
   }
 
   return applyModifiers(schema, prop, required);
