@@ -1,0 +1,24 @@
+skills/dokploy/SKILL.md
+  s_317f73428d5cbb::t_612f49a3c2cade 19,28,32,34
+package.json
+  s_317f73428d5cbb::t_d08acab222ac56 2-3
+  s_317f73428d5cbb::t_75e0c9d7f78d7a 35-37
+README.md
+  s_317f73428d5cbb::t_6f83650c64e4b3 24-25,29,35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "bbcdcd9ebc6891f565431f6e4a4155218f9d787d",
+  "prompts": {},
+  "sessions": {
+    "s_317f73428d5cbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3cee9ee-a7e9-406e-b7d5-ec99fc725ce0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
