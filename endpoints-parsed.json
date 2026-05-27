@@ -932,16 +932,6 @@
     ],
     "params": [],
     "bodyProps": {
-      "bitbucketBranch": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "bitbucketBuildPath": {
         "anyOf": [
           {
@@ -995,6 +985,11 @@
       "applicationId": {
         "type": "string"
       },
+      "bitbucketBranch": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9._\\-/]+$"
+      },
       "enableSubmodules": {
         "type": "boolean"
       },
@@ -1013,13 +1008,13 @@
       }
     },
     "bodyRequired": [
-      "bitbucketBranch",
       "bitbucketBuildPath",
       "bitbucketOwner",
       "bitbucketRepository",
       "bitbucketRepositorySlug",
       "bitbucketId",
-      "applicationId"
+      "applicationId",
+      "bitbucketBranch"
     ],
     "hasBody": true,
     "bodyRequired_flag": true
@@ -1261,16 +1256,6 @@
       "applicationId": {
         "type": "string"
       },
-      "giteaBranch": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "giteaBuildPath": {
         "anyOf": [
           {
@@ -1311,6 +1296,11 @@
           }
         ]
       },
+      "giteaBranch": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9._\\-/]+$"
+      },
       "enableSubmodules": {
         "type": "boolean"
       },
@@ -1330,11 +1320,11 @@
     },
     "bodyRequired": [
       "applicationId",
-      "giteaBranch",
       "giteaBuildPath",
       "giteaOwner",
       "giteaRepository",
-      "giteaId"
+      "giteaId",
+      "giteaBranch"
     ],
     "hasBody": true,
     "bodyRequired_flag": true
@@ -1352,16 +1342,6 @@
         "type": "string"
       },
       "repository": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "branch": {
         "anyOf": [
           {
             "type": "string"
@@ -1401,6 +1381,11 @@
           }
         ]
       },
+      "branch": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9._\\-/]+$"
+      },
       "triggerType": {
         "default": "push",
         "type": "string",
@@ -1429,10 +1414,10 @@
     "bodyRequired": [
       "applicationId",
       "repository",
-      "branch",
       "owner",
       "buildPath",
       "githubId",
+      "branch",
       "triggerType"
     ],
     "hasBody": true,
@@ -1449,16 +1434,6 @@
     "bodyProps": {
       "applicationId": {
         "type": "string"
-      },
-      "gitlabBranch": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
       },
       "gitlabBuildPath": {
         "anyOf": [
@@ -1520,6 +1495,11 @@
           }
         ]
       },
+      "gitlabBranch": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9._\\-/]+$"
+      },
       "enableSubmodules": {
         "type": "boolean"
       },
@@ -1539,13 +1519,13 @@
     },
     "bodyRequired": [
       "applicationId",
-      "gitlabBranch",
       "gitlabBuildPath",
       "gitlabOwner",
       "gitlabRepository",
       "gitlabId",
       "gitlabProjectId",
-      "gitlabPathNamespace"
+      "gitlabPathNamespace",
+      "gitlabBranch"
     ],
     "hasBody": true,
     "bodyRequired_flag": true
@@ -1559,16 +1539,6 @@
     ],
     "params": [],
     "bodyProps": {
-      "customGitBranch": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "applicationId": {
         "type": "string"
       },
@@ -1608,6 +1578,11 @@
       "enableSubmodules": {
         "type": "boolean"
       },
+      "customGitBranch": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9._\\-/]+$"
+      },
       "customGitSSHKeyId": {
         "anyOf": [
           {
@@ -1620,11 +1595,11 @@
       }
     },
     "bodyRequired": [
-      "customGitBranch",
       "applicationId",
       "customGitBuildPath",
       "customGitUrl",
-      "watchPaths"
+      "watchPaths",
+      "customGitBranch"
     ],
     "hasBody": true,
     "bodyRequired_flag": true
@@ -4615,6 +4590,32 @@
     "hasBody": false
   },
   {
+    "path": "/compose.previewTemplate",
+    "method": "POST",
+    "operationId": "compose-previewTemplate",
+    "tags": [
+      "compose"
+    ],
+    "params": [],
+    "bodyProps": {
+      "base64": {
+        "type": "string"
+      },
+      "appName": {
+        "type": "string"
+      },
+      "serverId": {
+        "type": "string"
+      }
+    },
+    "bodyRequired": [
+      "base64",
+      "appName"
+    ],
+    "hasBody": true,
+    "bodyRequired_flag": true
+  },
+  {
     "path": "/compose.processTemplate",
     "method": "POST",
     "operationId": "compose-processTemplate",
@@ -5599,6 +5600,39 @@
       "deployment"
     ],
     "params": [],
+    "bodyProps": {},
+    "bodyRequired": [],
+    "hasBody": false
+  },
+  {
+    "path": "/deployment.readLogs",
+    "method": "GET",
+    "operationId": "deployment-readLogs",
+    "tags": [
+      "deployment"
+    ],
+    "params": [
+      {
+        "name": "deploymentId",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      {
+        "name": "tail",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "default": 100,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    ],
     "bodyProps": {},
     "bodyRequired": [],
     "hasBody": false
@@ -18118,6 +18152,16 @@
       "name": {
         "type": "string"
       },
+      "description": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "cronExpression": {
         "type": "string"
       },
@@ -18338,6 +18382,16 @@
       },
       "name": {
         "type": "string"
+      },
+      "description": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "cronExpression": {
         "type": "string"

@@ -1,22 +1,40 @@
 {
-  "name": "dokploy-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for managing Dokploy infrastructure via API",
+  "name": "@prasetya/dokploy-kit",
+  "version": "2.0.0",
+  "description": "Two surfaces for AI agents to operate Dokploy infrastructure: a `dokploy` CLI + Claude Agent Skill (recommended), plus an MCP server. Tracks Dokploy v0.29.5, 526 endpoints across 48 grouped tools.",
   "main": "src/index.js",
   "bin": {
-    "dokploy-mcp": "src/index.js"
+    "dokploy-mcp": "src/index.js",
+    "dokploy": "src/cli.js",
+    "dokploy-kit": "src/cli.js"
   },
+  "files": [
+    "src/",
+    "scripts/",
+    "endpoints-parsed.json",
+    "skills/",
+    ".claude-plugin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/run-tests.js",
+    "cli": "node src/cli.js",
+    "test": "node test/run-tests.js && node test/run-cli-tests.js",
+    "test:mcp": "node test/run-tests.js",
+    "test:cli": "node test/run-cli-tests.js",
     "verify": "node test/verify-tools.js",
-    "parse": "node scripts/parse-spec.js"
+    "parse": "node scripts/parse-spec.js && node scripts/generate-skill-reference.js",
+    "generate-skill-reference": "node scripts/generate-skill-reference.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/andhikapraa/dokploy-mcp"
+    "url": "https://github.com/andhikapraa/dokploy-kit"
   },
-  "keywords": ["dokploy", "mcp", "deployment", "infrastructure", "model-context-protocol", "claude"],
+  "keywords": ["dokploy", "mcp", "cli", "agent-skill", "claude", "claude-code", "deployment", "infrastructure", "model-context-protocol"],
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Muhammad Andhika Prasetya",
   "license": "MIT",
   "type": "commonjs",
