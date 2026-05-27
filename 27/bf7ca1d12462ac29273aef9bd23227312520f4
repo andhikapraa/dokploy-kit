@@ -1,0 +1,29 @@
+.claude-plugin/marketplace.json
+  s_317f73428d5cbb::t_1565745e6c8e1b 3-6
+src/cli.js
+  s_317f73428d5cbb::t_fcb560a4cb14f6 518-540
+.github/workflows/continue-checks.yml
+  s_317f73428d5cbb::t_8cd977801236bd 31-34,41-48
+test/run-cli-tests.js
+  s_317f73428d5cbb::t_16963a53a0598b 240-273
+skills/dokploy/SKILL.md
+  s_317f73428d5cbb::t_ec2f5e882d6194 22,25-29,32
+README.md
+  s_317f73428d5cbb::t_994fe3a7f42445 21,24-29,31-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "27bf7ca1d12462ac29273aef9bd23227312520f4",
+  "prompts": {},
+  "sessions": {
+    "s_317f73428d5cbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3cee9ee-a7e9-406e-b7d5-ec99fc725ce0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
