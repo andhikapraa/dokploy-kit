@@ -1,20 +1,35 @@
 # dokploy-mcp
 
-> A Model Context Protocol (MCP) server that wraps the [Dokploy](https://dokploy.com) API, exposing **526 endpoints across 48 grouped tools** so AI agents like Claude Code can deploy apps, manage databases, configure domains, and operate Dokploy infrastructure conversationally.
+> Two ways for AI agents to operate [Dokploy](https://dokploy.com) infrastructure: a **`dokploy` CLI + Claude Agent Skill (recommended)** and a **Model Context Protocol server**. Both wrap the same 526-endpoint Dokploy API and share a single auto-generated catalog.
 
 Tracks **Dokploy v0.29.5**.
 
 ## Why
 
-The Dokploy REST API has ~500 endpoints — too many to register as individual MCP tools (most LLM clients cap tool counts and degrade with hundreds in context). This server **groups endpoints by domain** (e.g. `application`, `compose`, `postgres`, `notification`) into 48 tools, each with an `action` enum that routes to the right endpoint. The result: full API coverage in a context budget your model can actually handle.
+The Dokploy REST API has ~500 endpoints — too many to register as individual MCP tools (most LLM clients cap tool counts and degrade with hundreds in context). Two surfaces address this differently:
+
+- **CLI + Skill (recommended for Claude Code)** — schemas live on disk, not in the model's context window. The skill loads ~120 tokens at session start; full parameter schemas only load when Claude runs `dokploy <domain> <action> --help`. Discovery is progressive.
+- **MCP server** — groups endpoints into 48 `dokploy_<domain>` tools with `action` enums. Schemas load eagerly into context at session start. Works with any MCP client (Cursor, Cline, custom).
+
+## Which path should you pick?
+
+| If you... | Use |
+|---|---|
+| ...use **Claude Code** and want to keep context lean | **CLI + Skill** — ~120 tokens idle, ~52KB schemas only when needed |
+| ...use a non-Claude MCP client (Cursor, Cline, custom) | **MCP server** — schemas are the tool surface there |
+| ...want fine-grained per-instance routing visible in the model's prompt | **MCP server** — `instance` enum baked into every tool schema |
+| ...want to script `dokploy` from a shell, CI, or non-AI tooling | **CLI** — drop the Skill, treat it as a normal binary |
+
+Both surfaces share `endpoints-parsed.json`, multi-instance support, and the same parity guarantees. The MCP server is **not deprecated** — both ship.
 
 ## Features
 
 - ✅ **Full Dokploy v0.29.5 coverage** — 526 endpoints, auto-derived from the OpenAPI spec
-- ✅ **Multi-instance** — point a single MCP server at multiple Dokploy installs and route per-call (`instance: "main"` vs `instance: "staging"`)
-- ✅ **Self-updating** — when Dokploy ships a new version, run `npm run parse` to regenerate tool definitions from the live spec. No manual code per endpoint.
-- ✅ **Zero runtime spec dependency** — the parsed endpoints are committed to the repo. Production runs don't fetch anything from Dokploy at startup.
-- ✅ **3003-test MCP suite** + **175-test CLI suite** covering path formats, action mapping, schema generation, multi-instance routing, and CLI parity
+- ✅ **Two surfaces, one catalog** — `dokploy` CLI + Claude Agent Skill, plus an MCP server. Both read `endpoints-parsed.json`.
+- ✅ **Multi-instance** — point a single configuration at multiple Dokploy installs and route per-call (`--instance main` vs `--instance staging` on the CLI; `instance: "main"` arg on the MCP)
+- ✅ **Self-updating** — when Dokploy ships a new version, run `npm run parse` to regenerate the catalog + skill reference from the live spec. No manual code per endpoint.
+- ✅ **Zero runtime spec dependency** — the parsed endpoints are committed. Production runs don't fetch anything from Dokploy at startup.
+- ✅ **3003-test MCP suite** + **192-test CLI suite** covering path formats, action mapping, schema generation, multi-instance routing, value coercion, and CLI/MCP parity
 
 ## Quick start
 
@@ -30,7 +45,61 @@ npm install
 
 Dokploy → **Settings → API Keys → Create**. The key is sent as an `x-api-key` header (Bearer auth is not accepted by Dokploy).
 
-### 3. Add to your MCP client
+### 3. Pick a surface — CLI + Skill (recommended) or MCP server
+
+---
+
+#### Path A — CLI + Agent Skill (recommended for Claude Code)
+
+Keeps the LLM's context lean: the skill is a single short markdown file; full per-action parameter schemas load only when the model runs `--help`. Best when you live in Claude Code and want to spend context tokens on your code, not on tool surfaces.
+
+**Install the skill** to a place Claude discovers (`~/.claude/skills/` for user-global or `.claude/skills/` in the project for repo-local):
+
+```bash
+# user-global
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/skills/dokploy" ~/.claude/skills/dokploy
+```
+
+**Put the CLI on your PATH** (either way works):
+
+```bash
+# Option 1: install from this checkout
+npm link
+
+# Option 2: use it via npm script without linking
+npm run cli -- --list
+```
+
+**Configure auth** — same env vars the MCP server uses. Either export them in your shell, set them in your skill's runner config, or put them in a `.envrc`/`direnv` file. For a single instance:
+
+```bash
+export DOKPLOY_BASE_URL="https://your-dokploy-host/api"
+export DOKPLOY_API_KEY="your-key"
+```
+
+Multi-instance (one CLI, many Dokploys — pick per-call with `--instance NAME`):
+
+```bash
+export DOKPLOY_INSTANCES='[{"name":"main","baseUrl":"https://dokploy-a/api","apiKey":"key-a"},{"name":"staging","baseUrl":"https://dokploy-b/api","apiKey":"key-b"}]'
+export DOKPLOY_DEFAULT_INSTANCE="main"
+```
+
+Then ask Claude to do Dokploy things. The skill fires on prompts like "list my projects", "deploy on staging", or "promote this app from staging to prod" — it'll discover commands via `dokploy --help` and run them.
+
+Sanity check from a shell:
+
+```bash
+dokploy --help                       # configured instances + 48 domains
+dokploy --list                       # bare domain names
+dokploy project all                  # real API call
+dokploy auditLog all --help          # parameter signature for a specific action
+dokploy --instance staging project all
+```
+
+---
+
+#### Path B — MCP server (for non-Claude clients, or when you want eager schemas)
 
 Copy `.mcp.example.json` to `.mcp.json` (Claude Code auto-loads it from a project directory) or merge into your client's MCP config.
 
@@ -64,12 +133,10 @@ Copy `.mcp.example.json` to `.mcp.json` (Claude Code auto-loads it from a projec
 
 > **Path note for `cwd`:** the MCP client passes this through to `node` as the working directory. Some clients (e.g. Claude Code under `--strict-mcp-config`) ignore relative paths — always use an **absolute path**.
 
-### 4. Use it
-
 Once your MCP client connects, the LLM can call:
 ```
 dokploy_project { action: "all" }
-dokploy_application { action: "create", projectId: "...", name: "my-app", ... }
+dokploy_application { action: "create", environmentId: "...", name: "my-app", ... }
 dokploy_postgres   { action: "changePassword", postgresId: "...", databasePassword: "..." }
 dokploy_application { action: "readLogs", applicationId: "..." }
 ```
