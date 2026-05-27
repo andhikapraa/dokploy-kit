@@ -11,7 +11,7 @@ The `dokploy` CLI is a thin wrapper over the Dokploy API. Invoke it via Bash. **
 
 Every command is shaped:
 
-```
+```bash
 dokploy [--instance NAME] <domain> <action> [--key value ...]
 ```
 
@@ -110,7 +110,7 @@ This sends `?action=deploy&limit=50` to the API. Same pattern applies to any fut
 
 Dokploy organizes resources as **project → environment → application/postgres/mysql/etc.** Every create flow starts at the top and threads IDs down. The link from project to environment is `--projectId`; from environment to a resource (app, db, compose) is `--environmentId` — **not** `--projectId`. This is a frequent mistake; if `--help` shows `--environmentId (required)` on a `create` action, you need an environment first.
 
-```
+```text
 project create → projectId
 environment create --projectId <id> → environmentId
 application create --environmentId <id> → applicationId

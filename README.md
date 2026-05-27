@@ -76,7 +76,7 @@ dokploy_application { action: "readLogs", applicationId: "..." }
 
 ## Tool reference
 
-48 tools, 524 actions. Examples below — every tool takes an `action` enum plus the schema for that action's parameters. Use `list_tools` in your MCP client to see the full surface for any tool.
+48 tools, 526 actions. Examples below — every tool takes an `action` enum plus the schema for that action's parameters. Use `list_tools` in your MCP client to see the full surface for any tool.
 
 | Tool | Actions | Examples |
 |---|---|---|
@@ -171,10 +171,11 @@ src/api-client.js          ← HTTP client; x-api-key header; instance-aware
 ## Development
 
 ```bash
-npm test       # 2993 unit tests (offline, no API calls)
+npm test       # 3003 MCP + 175 CLI tests (offline, no API calls)
 npm run verify # live smoke test against DOKPLOY_BASE_URL — needs DOKPLOY_API_KEY
-npm run parse  # regenerate endpoints-parsed.json from dokployapi.json
+npm run parse  # regenerate endpoints-parsed.json + skill reference from dokployapi.json
 npm start      # run the MCP server (stdio transport)
+npm run cli    # run the dokploy CLI directly (e.g. `npm run cli -- --list`)
 ```
 
 ## License

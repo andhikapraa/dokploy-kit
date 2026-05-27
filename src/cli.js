@@ -263,9 +263,25 @@ const NUMERIC_LITERAL = /^-?(\d+\.?\d*|\.\d+)$/;
 
 function coerce(value, schema) {
   if (value === true || value === false) return value;
-  if (typeof value !== 'string') return value;
 
   const type = effectiveType(schema);
+
+  // Arrays-in: repeated flags (`--port 80 --port 443`) arrive at coerce as
+  // string arrays. Coerce each item against schema.items so array<number>
+  // doesn't ship as ["80","443"].
+  if (Array.isArray(value)) {
+    if (type === 'array' && schema && schema.items) {
+      return value.map((item) => coerce(item, schema.items));
+    }
+    return value;
+  }
+
+  if (typeof value !== 'string') return value;
+
+  // Honor the literal 'null' first for any nullable schema. Earlier this only
+  // worked for string fields, so `--port null` on a nullable number was
+  // rejected by validateValue.
+  if (value === 'null' && isNullable(schema)) return null;
 
   // No schema → fall back to permissive legacy parsing. Used by ad-hoc callers
   // (tests) that pass raw values without a schema.
@@ -284,9 +300,19 @@ function coerce(value, schema) {
   // API expects a string.
   if (type === 'array' || type === 'object') {
     if (/^[\[{]/.test(value)) {
-      try { return JSON.parse(value); } catch { /* fall through */ }
+      try {
+        const parsed = JSON.parse(value);
+        if (type === 'array' && Array.isArray(parsed) && schema && schema.items) {
+          return parsed.map((item) => coerce(item, schema.items));
+        }
+        return parsed;
+      } catch { /* fall through */ }
     }
-    if (type === 'array') return value.split(',').map((s) => s.trim());
+    if (type === 'array') {
+      const parts = value.split(',').map((s) => s.trim());
+      if (schema && schema.items) return parts.map((item) => coerce(item, schema.items));
+      return parts;
+    }
     return value;
   }
 
@@ -304,9 +330,6 @@ function coerce(value, schema) {
     return n;
   }
 
-  // string (or null/unknown) — return as-is. If the schema is nullable and the
-  // user wrote the literal 'null', honor it.
-  if (type === 'string' && value === 'null' && isNullable(schema)) return null;
   return value;
 }
 
@@ -442,6 +465,26 @@ function printActionHelp(domain, action, ep) {
  *      expects a string; validator flags the type mismatch.
  *   3. `--certificateType bogus` — value isn't in the schema's enum.
  */
+/**
+ * Walk a schema (anyOf-aware) and return the first variant carrying a given
+ * keyword (e.g. 'minLength', 'minimum'). Mirrors what openApiToZod does when
+ * it folds anyOf[primitive, null] down to a single typed schema.
+ */
+function findConstraint(schema, key) {
+  if (!schema || typeof schema !== 'object') return undefined;
+  if (schema[key] !== undefined) return schema[key];
+  const variants = schema.anyOf || schema.oneOf;
+  if (Array.isArray(variants)) {
+    for (const v of variants) {
+      if (v && v.type !== 'null') {
+        const found = findConstraint(v, key);
+        if (found !== undefined) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
 function validateValue(coerced, raw, schema, flagName) {
   if (!schema || typeof schema !== 'object') return null;
 
@@ -478,6 +521,46 @@ function validateValue(coerced, raw, schema, flagName) {
   if (type === 'array' && !Array.isArray(coerced)) {
     return `--${flagName}: expected array, got ${JSON.stringify(coerced)}`;
   }
+
+  // Schema constraints — mirror what the MCP's openApiToZod enforces via Zod
+  // .min()/.max(). Without these, bad values reach the API and bounce as 400.
+  if (type === 'string') {
+    const minLength = findConstraint(schema, 'minLength');
+    if (minLength !== undefined && coerced.length < minLength) {
+      return `--${flagName}: expected length ≥ ${minLength}, got ${coerced.length}`;
+    }
+    const maxLength = findConstraint(schema, 'maxLength');
+    if (maxLength !== undefined && coerced.length > maxLength) {
+      return `--${flagName}: expected length ≤ ${maxLength}, got ${coerced.length}`;
+    }
+  }
+  if (type === 'number' || type === 'integer') {
+    const minimum = findConstraint(schema, 'minimum');
+    if (minimum !== undefined && coerced < minimum) {
+      return `--${flagName}: expected ≥ ${minimum}, got ${coerced}`;
+    }
+    const maximum = findConstraint(schema, 'maximum');
+    if (maximum !== undefined && coerced > maximum) {
+      return `--${flagName}: expected ≤ ${maximum}, got ${coerced}`;
+    }
+  }
+  if (type === 'array') {
+    const minItems = findConstraint(schema, 'minItems');
+    if (minItems !== undefined && coerced.length < minItems) {
+      return `--${flagName}: expected ≥ ${minItems} items, got ${coerced.length}`;
+    }
+    const maxItems = findConstraint(schema, 'maxItems');
+    if (maxItems !== undefined && coerced.length > maxItems) {
+      return `--${flagName}: expected ≤ ${maxItems} items, got ${coerced.length}`;
+    }
+    if (schema.items) {
+      for (let i = 0; i < coerced.length; i++) {
+        const itemErr = validateValue(coerced[i], coerced[i], schema.items, `${flagName}[${i}]`);
+        if (itemErr) return itemErr;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -565,7 +648,11 @@ async function main() {
   }
 
   // `dokploy --list` → bare domain names, one per line.
+  // Reject when combined with a domain/action to keep fail-loudly behavior.
   if (flags.list) {
+    if (positional.length > 0) {
+      fail(`--list cannot be combined with positional arguments (${positional.join(' ')})`);
+    }
     for (const d of Object.keys(index).sort()) process.stdout.write(`${d}\n`);
     return;
   }
@@ -614,8 +701,9 @@ async function main() {
   }
 
   // Reject unknown flags so typos (`--httpss`) or stale skill instructions
-  // fail loudly instead of silently dropping the value.
-  const expectedFlags = new Set(['help', 'list']);
+  // fail loudly instead of silently dropping the value. `--list` is handled
+  // (and errored) before reaching here, so it's not in the allowlist.
+  const expectedFlags = new Set(['help']);
   for (const p of ep.params) expectedFlags.add(cliFlagFor(p.name));
   for (const name of Object.keys(ep.bodyProps || {})) expectedFlags.add(cliFlagFor(name));
   const unknown = Object.keys(flags).filter((k) => !expectedFlags.has(k));
@@ -664,4 +752,5 @@ module.exports = {
   isNullable,
   assembleRequest,
   validateValue,
+  findConstraint,
 };

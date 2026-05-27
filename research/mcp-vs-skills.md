@@ -124,7 +124,7 @@ Counter-argument (MCPJam): MCP still wins on **runtime performance** (no filesys
 
 ## Implications for this repo (`dokploy-manager`)
 
-This codebase is already an **MCP server** — it exposes the Dokploy API (524 endpoints / 48 grouped tools) over MCP. That's the "MCP" half of the pattern.
+This codebase is already an **MCP server** — it exposes the Dokploy API (526 endpoints / 48 grouped tools) over MCP. That's the "MCP" half of the pattern.
 
 The natural complement would be **Skills** that encode Dokploy operational playbooks on top of these tools — e.g.:
 - A "deploy-and-verify" skill that knows to call `dokploy_application.create` → `dokploy_domain.create` → `dokploy_deployment.deploy` → poll status → roll back on failure.

@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { actionOf } = require('../src/cli.js');
 
 const endpoints = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', 'endpoints-parsed.json'), 'utf-8')
@@ -16,9 +17,7 @@ const byTag = {};
 for (const ep of endpoints) {
   for (const tag of ep.tags) {
     if (!byTag[tag]) byTag[tag] = [];
-    const parts = ep.operationId.split('-');
-    const action = parts.slice(1).join('-') || parts[0];
-    byTag[tag].push({ action, method: ep.method, opId: ep.operationId });
+    byTag[tag].push({ action: actionOf(ep.operationId), method: ep.method, opId: ep.operationId });
   }
 }
 

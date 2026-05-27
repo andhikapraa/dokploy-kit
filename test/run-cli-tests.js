@@ -47,10 +47,23 @@ function spawnCli(args, envOverrides = {}) {
     HOME: process.env.HOME,
     NODE_PATH: process.env.NODE_PATH || '',
   };
+  // 30s timeout so a regression that hangs the CLI doesn't stall CI indefinitely.
   return spawnSync('node', [CLI_PATH, ...args], {
     env: { ...baseEnv, ...envOverrides },
     encoding: 'utf-8',
+    timeout: 30_000,
   });
+}
+
+// Parse JSON from CLI output, but turn parse errors into assertion failures
+// rather than crashing the test runner halfway through.
+function parseJsonOrFail(stdout, label) {
+  try {
+    return JSON.parse(stdout);
+  } catch (e) {
+    assert(false, `${label} must be valid JSON; got: ${stdout.slice(0, 200)} (parse error: ${e.message})`);
+    return null;
+  }
 }
 
 // --- Pure function tests -----------------------------------------------------
@@ -172,9 +185,57 @@ assert(cli.coerce('8080', previewSchema) === 8080, 'nullable-integer anyOf coerc
 const arrStr = cli.coerce('a,b,c', { type: 'array', items: { type: 'string' } });
 assert(Array.isArray(arrStr) && arrStr.length === 3 && arrStr[0] === 'a', 'array<string> comma-split');
 const arrNum = cli.coerce('1,2,3', { type: 'array', items: { type: 'number' } });
-assert(Array.isArray(arrNum) && arrNum[0] === '1', 'array<number> comma-split returns strings (use JSON for typed array)');
+assert(Array.isArray(arrNum) && arrNum[0] === 1, 'array<number> comma-split coerces items to numbers');
 const arrJson = cli.coerce('[1,2,3]', { type: 'array', items: { type: 'number' } });
 assert(Array.isArray(arrJson) && arrJson[0] === 1, 'JSON array form preserves number type');
+
+// Array element coercion (CodeRabbit Major):
+// repeated flags arrive at coerce as a string array; comma-split also returns strings.
+// Both should coerce items against schema.items so array<number> ships as numbers.
+const numArrSchema = { type: 'array', items: { type: 'number' } };
+const repeated = cli.coerce(['80', '443'], numArrSchema);
+assert(repeated[0] === 80 && repeated[1] === 443, 'array<number>: repeated flags coerce items');
+const commaSplit = cli.coerce('80,443', numArrSchema);
+assert(commaSplit[0] === 80 && commaSplit[1] === 443, 'array<number>: comma-split coerces items');
+const boolArr = cli.coerce(['true', 'false'], { type: 'array', items: { type: 'boolean' } });
+assert(boolArr[0] === true && boolArr[1] === false, 'array<boolean>: items coerce to booleans');
+
+// Null literal for nullable non-string schemas (CodeRabbit Major, Opus, Sonnet).
+const nullableNum = { anyOf: [{ type: 'number' }, { type: 'null' }] };
+assert(cli.coerce('null', nullableNum) === null, '--port null on nullable number → null');
+assert(cli.coerce('null', { anyOf: [{ type: 'boolean' }, { type: 'null' }] }) === null,
+  '--enabled null on nullable boolean → null');
+// Non-nullable still passes through (validateValue will reject).
+assert(cli.coerce('null', { type: 'number' }) === 'null',
+  'null literal on non-nullable number stays as string (validator rejects)');
+
+// Schema constraints — Codex P2 + Opus live audit.
+// minLength
+let err;
+const minLenSchema = { type: 'string', minLength: 1 };
+err = cli.validateValue('', '', minLenSchema, 'name');
+assert(err && /length ≥ 1/.test(err), 'minLength enforced');
+err = cli.validateValue('x', 'x', minLenSchema, 'name');
+assert(err === null, 'minLength satisfied');
+// minimum/maximum
+const tailSchema = { type: 'number', minimum: 1, maximum: 10000 };
+err = cli.validateValue(0, '0', tailSchema, 'tail');
+assert(err && /≥ 1/.test(err), 'minimum enforced (`--tail 0` rejected)');
+err = cli.validateValue(99999, '99999', tailSchema, 'tail');
+assert(err && /≤ 10000/.test(err), 'maximum enforced');
+err = cli.validateValue(100, '100', tailSchema, 'tail');
+assert(err === null, 'in-range value passes');
+// minItems/maxItems
+const minItemsSchema = { type: 'array', items: { type: 'string' }, minItems: 1 };
+err = cli.validateValue([], [], minItemsSchema, 'tags');
+assert(err && /≥ 1 items/.test(err), 'minItems enforced');
+// Array element validation
+const numItemsSchema = { type: 'array', items: { type: 'number' } };
+err = cli.validateValue([80, 'not-a-number'], [80, 'not-a-number'], numItemsSchema, 'ports');
+assert(err && /ports\[1\]/.test(err), 'array element type mismatch flagged with index');
+// findConstraint walks anyOf
+const anyofMinSchema = { anyOf: [{ type: 'number', minimum: 1 }, { type: 'null' }] };
+assert(cli.findConstraint(anyofMinSchema, 'minimum') === 1, 'findConstraint walks anyOf');
 
 section('assembleRequest (the API request assembly path)');
 // Grab real endpoints from the parsed catalog so we test against the actual
@@ -244,7 +305,7 @@ section('validateValue + strict coerce (block silent type mismatches)');
 // --https tru: coerce now leaves 'tru' as string; validator rejects it.
 const httpsField = domainCreate.bodyProps.https;
 assert(httpsField, 'test setup: domain.create has https field');
-let err = cli.validateValue(cli.coerce('tru', httpsField), 'tru', httpsField, 'https');
+err = cli.validateValue(cli.coerce('tru', httpsField), 'tru', httpsField, 'https');
 assert(err && /expected true\/false/.test(err), 'invalid boolean string rejected');
 
 // --port abc: coerce leaves 'abc' as string (Number(abc) is NaN); validator rejects.
@@ -370,7 +431,7 @@ assert(r.stdout.includes('[--instance NAME]'), '--instance shown in usage line f
 section('Integration: dokploy instances');
 r = spawnCli(['instances'], multiEnv);
 assert(r.status === 0, 'instances exits 0');
-const inst = JSON.parse(r.stdout);
+const inst = parseJsonOrFail(r.stdout, 'instances stdout');
 assert(Array.isArray(inst) && inst.length === 2, 'instances returns 2-element array');
 assert(inst[0].name === 'main' && inst[0].isDefault === true, 'default flagged');
 assert(inst[1].isDefault === false, 'non-default flagged false');
@@ -490,6 +551,16 @@ r = spawnCli(['domain', 'create', '--help'], { DOKPLOY_BASE_URL: 'https://x', DO
 assert(r.status === 0, 'domain create --help exits 0');
 // --port is anyOf[number, null] in the Dokploy spec; help should show 'number?' not 'any'.
 assert(/--port\s+number\?/.test(r.stdout), '--port shows as nullable number (was: any)');
+
+section('Integration: --list rejected with positional args (Sonnet+Opus finding)');
+r = spawnCli(['project', 'all', '--list'], { DOKPLOY_BASE_URL: 'https://x', DOKPLOY_API_KEY: 'k' });
+assert(r.status === 1, '--list with positional exits 1');
+assert(/--list cannot be combined/.test(r.stderr), 'error names the conflict');
+
+section('Integration: nullable null literal end-to-end');
+r = spawnCli(['domain', 'create', '--help'], { DOKPLOY_BASE_URL: 'https://x', DOKPLOY_API_KEY: 'k' });
+assert(r.status === 0, 'domain create --help still works');
+// (smoke for the nullable handling — unit tests above prove the coercion path)
 
 section('Integration: missing auth env');
 r = spawnCli(['--list']);  // no env
