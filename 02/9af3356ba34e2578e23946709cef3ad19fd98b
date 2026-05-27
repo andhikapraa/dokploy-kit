@@ -1,0 +1,43 @@
+scripts/generate-skill-reference.js
+  s_317f73428d5cbb::t_0f4f7be8d4b721 10,20
+skills/dokploy/SKILL.md
+  s_317f73428d5cbb::t_ae57d8d0ec5694 14
+  s_317f73428d5cbb::t_fef6012a8a0f3a 113
+research/mcp-vs-skills.md
+  s_317f73428d5cbb::t_f41e5e641c2b29 127
+package.json
+  s_317f73428d5cbb::t_c932f2c06f3bfd 17
+test/run-cli-tests.js
+  s_317f73428d5cbb::t_36e77ea2454aea 308
+  s_317f73428d5cbb::t_c87c178d5d7e97 434
+  s_317f73428d5cbb::t_e0b7cdd58c1be4 555-564
+  s_317f73428d5cbb::t_c330ea8367950b 50,54,58-66
+  s_317f73428d5cbb::t_c3cab200e70caf 188
+  s_317f73428d5cbb::t_876e9a0d1e3855 192-213,215-239
+  s_317f73428d5cbb::t_2d2116c07e613d 214
+README.md
+  s_317f73428d5cbb::t_424eb2ae1b4f81 174,176,178
+  s_317f73428d5cbb::t_31f59b5e31d6e4 79
+src/cli.js
+  s_317f73428d5cbb::t_bd16265bd1073d 704-706
+  s_317f73428d5cbb::t_023c0cfaa06b7f 468-487,524-563
+  s_317f73428d5cbb::t_26e71c787a9ae2 755
+  s_317f73428d5cbb::t_4e0d233d381297 651,653-655
+  s_317f73428d5cbb::t_4c1f92b1afdecf 269-285,303-314
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "029af3356ba34e2578e23946709cef3ad19fd98b",
+  "prompts": {},
+  "sessions": {
+    "s_317f73428d5cbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3cee9ee-a7e9-406e-b7d5-ec99fc725ce0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
