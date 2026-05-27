@@ -4,13 +4,16 @@
   "description": "MCP server for managing Dokploy infrastructure via API",
   "main": "src/index.js",
   "bin": {
-    "dokploy-mcp": "src/index.js"
+    "dokploy-mcp": "src/index.js",
+    "dokploy": "src/cli.js"
   },
   "scripts": {
     "start": "node src/index.js",
+    "cli": "node src/cli.js",
     "test": "node test/run-tests.js",
     "verify": "node test/verify-tools.js",
-    "parse": "node scripts/parse-spec.js"
+    "parse": "node scripts/parse-spec.js",
+    "generate-skill-reference": "node scripts/generate-skill-reference.js"
   },
   "repository": {
     "type": "git",
