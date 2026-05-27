@@ -515,8 +515,29 @@ function validateValue(coerced, raw, schema, flagName) {
   if ((type === 'number' || type === 'integer') && typeof coerced !== 'number') {
     return `--${flagName}: expected ${type}, got ${JSON.stringify(coerced)}`;
   }
-  if (type === 'object' && (typeof coerced !== 'object' || Array.isArray(coerced))) {
-    return `--${flagName}: expected object, got ${JSON.stringify(coerced)}`;
+  if (type === 'object') {
+    if (typeof coerced !== 'object' || Array.isArray(coerced)) {
+      return `--${flagName}: expected object, got ${JSON.stringify(coerced)}`;
+    }
+    // Walk required properties and validate each, matching what the MCP's
+    // openApiToZod produces via z.object(shape) with .required(). Without
+    // this, --metricsConfig '{}' would slip past when the API needs nested
+    // fields like server/containers.
+    if (Array.isArray(schema.required)) {
+      for (const prop of schema.required) {
+        if (coerced[prop] === undefined) {
+          return `--${flagName}: missing required property '${prop}'`;
+        }
+      }
+    }
+    if (schema.properties && typeof schema.properties === 'object') {
+      for (const [prop, propSchema] of Object.entries(schema.properties)) {
+        if (coerced[prop] !== undefined) {
+          const propErr = validateValue(coerced[prop], coerced[prop], propSchema, `${flagName}.${prop}`);
+          if (propErr) return propErr;
+        }
+      }
+    }
   }
   if (type === 'array' && !Array.isArray(coerced)) {
     return `--${flagName}: expected array, got ${JSON.stringify(coerced)}`;

@@ -28,10 +28,23 @@ jobs:
 
       - name: Verify parser is up to date
         run: |
-          npm run parse -- dokployapi.json /tmp/regen.json
+          # Invoke parse-spec.js directly. `npm run parse` now chains
+          # generate-skill-reference.js with `&&`, which would route the
+          # trailing `--` args to the second script instead of the parser.
+          node scripts/parse-spec.js dokployapi.json /tmp/regen.json
           if ! diff -q endpoints-parsed.json /tmp/regen.json > /dev/null; then
             echo "::error::endpoints-parsed.json is out of sync with dokployapi.json."
             echo "Run \`npm run parse\` locally and commit the result."
             diff endpoints-parsed.json /tmp/regen.json | head -50
+            exit 1
+          fi
+
+      - name: Verify skill reference is up to date
+        run: |
+          node scripts/generate-skill-reference.js
+          if ! git diff --quiet skills/dokploy/reference.md; then
+            echo "::error::skills/dokploy/reference.md is out of sync with endpoints-parsed.json."
+            echo "Run \`npm run generate-skill-reference\` locally and commit the result."
+            git diff skills/dokploy/reference.md | head -50
             exit 1
           fi

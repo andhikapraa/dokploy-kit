@@ -237,6 +237,40 @@ assert(err && /ports\[1\]/.test(err), 'array element type mismatch flagged with 
 const anyofMinSchema = { anyOf: [{ type: 'number', minimum: 1 }, { type: 'null' }] };
 assert(cli.findConstraint(anyofMinSchema, 'minimum') === 1, 'findConstraint walks anyOf');
 
+// Nested object validation (Codex round-2 P2):
+// validateValue used to only check `typeof === 'object'`. With required
+// properties declared on the schema, missing fields now error before reaching
+// the API.
+const adminMetrics = findEndpoint('admin-setupMonitoring').bodyProps.metricsConfig;
+assert(adminMetrics && adminMetrics.type === 'object', 'test setup: metricsConfig is an object schema');
+err = cli.validateValue({}, {}, adminMetrics, 'metricsConfig');
+assert(err && /missing required property/.test(err),
+  'nested object: empty object rejected when required nested fields are missing');
+err = cli.validateValue({ server: {} }, { server: {} }, adminMetrics, 'metricsConfig');
+assert(err && /missing required property/.test(err),
+  'nested object: partial object rejected (still missing siblings)');
+// Synthetic object with required nested + properties — full structural recursion.
+const syntheticObj = {
+  type: 'object',
+  required: ['name', 'meta'],
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    meta: {
+      type: 'object',
+      required: ['version'],
+      properties: { version: { type: 'string' } },
+    },
+  },
+};
+err = cli.validateValue({ name: 'x', meta: {} }, { name: 'x', meta: {} }, syntheticObj, 'cfg');
+assert(err && /missing required property/.test(err) && /version/.test(err),
+  'nested object: deep recursion catches nested-of-nested missing required');
+err = cli.validateValue({ name: '', meta: { version: '1' } }, { name: '', meta: { version: '1' } }, syntheticObj, 'cfg');
+assert(err && /cfg\.name/.test(err) && /length ≥ 1/.test(err),
+  'nested object: child constraint failure surfaces with dotted path');
+err = cli.validateValue({ name: 'x', meta: { version: '1' } }, { name: 'x', meta: { version: '1' } }, syntheticObj, 'cfg');
+assert(err === null, 'nested object: fully-populated valid object passes');
+
 section('assembleRequest (the API request assembly path)');
 // Grab real endpoints from the parsed catalog so we test against the actual
 // shape MCP sees — no synthetic schemas that could drift from reality.

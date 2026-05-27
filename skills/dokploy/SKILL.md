@@ -19,11 +19,17 @@ dokploy --help
 npx -y dokploy-kit --help
 ```
 
-A one-liner that always works:
+A one-liner that always works, with no risk of retrying a failed CLI invocation:
 
 ```bash
-command -v dokploy >/dev/null && dokploy "$@" || npx -y dokploy-kit "$@"
+if command -v dokploy >/dev/null 2>&1; then
+  dokploy "$@"
+else
+  npx -y dokploy-kit "$@"
+fi
 ```
+
+> **Do not** use `... && dokploy "$@" || npx -y dokploy-kit "$@"`. That falls back whenever `dokploy` exits non-zero — including legitimate failures like 4xx API errors or validation rejections — and re-runs the same command through `npx`, which is dangerous for destructive operations.
 
 Examples below use `dokploy` for brevity. If you get `command not found`, substitute `npx -y dokploy-kit` (same flags, same output).
 
