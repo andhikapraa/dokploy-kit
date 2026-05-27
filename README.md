@@ -1,8 +1,41 @@
-# dokploy-mcp
+# dokploy-kit
 
 > Two ways for AI agents to operate [Dokploy](https://dokploy.com) infrastructure: a **`dokploy` CLI + Claude Agent Skill (recommended)** and a **Model Context Protocol server**. Both wrap the same 526-endpoint Dokploy API and share a single auto-generated catalog.
 
 Tracks **Dokploy v0.29.5**.
+
+## Install (recommended)
+
+If you use Claude Code (or any agent that supports the open Agent Skills standard), one command installs the skill into your agent's discovery path:
+
+```bash
+# Project-local (recommended) — installs into .claude/skills/
+npx skills add andhikapraa/dokploy-kit -a claude-code
+
+# Or globally — installs into ~/.claude/skills/
+npx skills add andhikapraa/dokploy-kit -a claude-code -g
+```
+
+`npx skills` is the de-facto community installer ([vercel-labs/skills](https://github.com/vercel-labs/skills)) and supports 55+ agents — pass `-a cursor`, `-a codex`, etc. Anthropic itself recommends it for their own skills.
+
+You'll also need the `dokploy` CLI binary on `PATH`. Two options:
+
+```bash
+# Clone + npm link (works for any agent)
+git clone https://github.com/andhikapraa/dokploy-kit && cd dokploy-kit && npm install && npm link
+
+# Or run via this checkout
+cd dokploy-kit && npm run cli -- --list
+```
+
+Set auth env (`DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY` for single-instance, or `DOKPLOY_INSTANCES` JSON for multi). See [Path A](#path-a--cli--agent-skill-recommended-for-claude-code) below for the full setup.
+
+Alternative — **Claude Code plugin marketplace** for users who prefer `/plugin` UX:
+
+```text
+/plugin marketplace add andhikapraa/dokploy-kit
+/plugin install dokploy@dokploy-kit
+```
 
 ## Why
 
@@ -36,8 +69,8 @@ Both surfaces share `endpoints-parsed.json`, multi-instance support, and the sam
 ### 1. Install
 
 ```bash
-git clone https://github.com/andhikapraa/dokploy-mcp
-cd dokploy-mcp
+git clone https://github.com/andhikapraa/dokploy-kit
+cd dokploy-kit
 npm install
 ```
 
@@ -107,10 +140,10 @@ Copy `.mcp.example.json` to `.mcp.json` (Claude Code auto-loads it from a projec
 ```json
 {
   "mcpServers": {
-    "dokploy-mcp": {
+    "dokploy-kit": {
       "command": "node",
       "args": ["src/index.js"],
-      "cwd": "/absolute/path/to/dokploy-mcp",
+      "cwd": "/absolute/path/to/dokploy-kit",
       "env": {
         "DOKPLOY_BASE_URL": "https://your-dokploy-host/api",
         "DOKPLOY_API_KEY": "your-key"

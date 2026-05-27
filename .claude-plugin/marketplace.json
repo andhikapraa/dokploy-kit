@@ -1,0 +1,18 @@
+{
+  "name": "dokploy-kit",
+  "owner": "andhikapraa",
+  "description": "AI-agent operator surfaces for Dokploy infrastructure — CLI, Skill, and MCP server backed by the full 526-endpoint API.",
+  "plugins": [
+    {
+      "name": "dokploy",
+      "description": "Drive Dokploy via the `dokploy` CLI: discover commands progressively, route across multi-instance configs, manage projects/environments/applications/databases/domains conversationally.",
+      "version": "1.0.0",
+      "source": ".",
+      "skills": ["./skills/dokploy"],
+      "homepage": "https://github.com/andhikapraa/dokploy-kit",
+      "repository": "https://github.com/andhikapraa/dokploy-kit",
+      "license": "MIT",
+      "keywords": ["dokploy", "deployment", "infrastructure", "cli", "skill"]
+    }
+  ]
+}
