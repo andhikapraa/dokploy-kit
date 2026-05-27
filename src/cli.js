@@ -14,13 +14,17 @@
  * Auth: DOKPLOY_API_KEY + DOKPLOY_BASE_URL, or DOKPLOY_INSTANCES + --instance.
  *
  * Behavioral parity with src/index.js (the MCP server):
- *   - Body fields named `action` or `instance` are exposed as `--param_action`
- *     / `--param_instance` to avoid collision with routing args (mirrors the
- *     MCP's `param_*` renaming in tool-generator.js + index.js).
+ *   - Query OR body params named `action` or `instance` are exposed as
+ *     `--param_action` / `--param_instance` to avoid collision with routing
+ *     args (mirrors the MCP's `param_*` renaming in tool-generator.js +
+ *     index.js). Today this is exercised by `auditLog all`, whose `action`
+ *     query param is reached via `dokploy auditLog all --param_action ...`.
  *   - Multi-instance: when >1 instance is configured, `--instance NAME` picks
  *     one; configured names are surfaced in `dokploy --help` so they can be
  *     discovered without an API call. With 1 instance, `--instance` is hidden.
+ *     `--instance` is accepted in any position (before or after positional args).
  *   - Duplicate instance names are rejected at startup (matches MCP).
+ *   - Unknown flags are rejected with a list and `--help` pointer.
  */
 
 const path = require('path');
@@ -113,10 +117,16 @@ function pickClient(instances, defaultInstance, requestedName) {
 }
 
 /**
- * Parse argv into { globalFlags, positional, flags }.
- * Global flags (--instance) consumed before positional args.
- * Flags after positional accept either `--k v` or `--k=v`.
- * Repeated `--k` becomes an array. Bare `--flag` is boolean true.
+ * Parse argv into { globalFlags, positional, flags, error? }.
+ *
+ * --instance is accepted in any position (before or after positional args)
+ * and always lands in globalFlags. Specifying it twice with conflicting
+ * values returns an error rather than silently picking one. This prevents
+ * the silent default-instance routing of trailing `--instance` that an
+ * earlier version had: `dokploy project remove --projectId X --instance staging`
+ * used to ignore the `--instance` and run against the default instance.
+ *
+ * Other flags: --k v / --k=v / bare --k (boolean true). Repeated --k → array.
  */
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -124,32 +134,42 @@ function parseArgs(argv) {
   const positional = [];
   const flags = {};
 
-  let i = 0;
-  while (i < args.length && args[i].startsWith('-')) {
-    const a = args[i];
-    if (a === '--help' || a === '-h') { flags.help = true; i++; continue; }
-    if (a === '--list') { flags.list = true; i++; continue; }
-    if (a === '--instance' && args[i + 1]) { globalFlags.instance = args[i + 1]; i += 2; continue; }
-    if (a.startsWith('--instance=')) { globalFlags.instance = a.slice('--instance='.length); i++; continue; }
-    break;
-  }
-  while (i < args.length && !args[i].startsWith('-')) {
-    positional.push(args[i]);
-    i++;
-  }
-  while (i < args.length) {
-    const a = args[i];
-    if (a === '--help' || a === '-h') { flags.help = true; i++; continue; }
+  const setInstance = (value) => {
+    if (globalFlags.instance !== undefined && globalFlags.instance !== value) {
+      return `--instance specified twice with conflicting values: '${globalFlags.instance}' and '${value}'`;
+    }
+    globalFlags.instance = value;
+    return null;
+  };
+
+  // Consume one token (or two for `--k v`). Returns { advance, error? }.
+  const consumeFlag = (a, next) => {
+    if (a === '--help' || a === '-h') { flags.help = true; return { advance: 1 }; }
+    if (a === '--list') { flags.list = true; return { advance: 1 }; }
+    if (a === '--instance') {
+      if (next === undefined || next.startsWith('--')) {
+        return { advance: 1, error: '--instance requires a value' };
+      }
+      const err = setInstance(next);
+      return { advance: 2, error: err };
+    }
+    if (a.startsWith('--instance=')) {
+      const value = a.slice('--instance='.length);
+      if (value === '') return { advance: 1, error: '--instance= requires a value' };
+      const err = setInstance(value);
+      return { advance: 1, error: err };
+    }
     if (a.startsWith('--')) {
       let key = a.slice(2);
       let value;
+      let advance = 1;
       if (key.includes('=')) {
         const eq = key.indexOf('=');
         value = key.slice(eq + 1);
         key = key.slice(0, eq);
-      } else if (args[i + 1] !== undefined && !args[i + 1].startsWith('--')) {
-        value = args[i + 1];
-        i++;
+      } else if (next !== undefined && !next.startsWith('--')) {
+        value = next;
+        advance = 2;
       } else {
         value = true;
       }
@@ -158,44 +178,148 @@ function parseArgs(argv) {
       } else {
         flags[key] = value;
       }
-      i++;
-    } else {
-      i++;
+      return { advance };
     }
+    // Single-dash tokens (-x, -foo, etc.) — silently swallowed before. Reject
+    // explicitly so typos like `dokploy -x project all` don't get dropped.
+    if (a.startsWith('-')) {
+      return { advance: 1, error: `Unknown flag '${a}' (use --<name> form; -h is the only single-dash alias, for --help)` };
+    }
+    return { advance: 1 };
+  };
+
+  let i = 0;
+  // Phase 1: leading flags (before positional)
+  while (i < args.length && args[i].startsWith('-')) {
+    const { advance, error } = consumeFlag(args[i], args[i + 1]);
+    if (error) return { globalFlags, positional, flags, error };
+    i += advance;
+  }
+  // Phase 2: positional
+  while (i < args.length && !args[i].startsWith('-')) {
+    positional.push(args[i]);
+    i++;
+  }
+  // Phase 3: trailing flags + bare tokens. --instance still routes to globalFlags.
+  // Bare non-flag tokens here are extra positional — capture them so the
+  // extra-positional guard in main() catches them rather than silently dropping.
+  while (i < args.length) {
+    if (!args[i].startsWith('-')) {
+      positional.push(args[i]);
+      i++;
+      continue;
+    }
+    const { advance, error } = consumeFlag(args[i], args[i + 1]);
+    if (error) return { globalFlags, positional, flags, error };
+    i += advance;
   }
   return { globalFlags, positional, flags };
 }
 
+/**
+ * Resolve an OpenAPI schema to its effective primitive type, walking through
+ * `anyOf`/`oneOf` wrappers and discarding null variants. Mirrors the MCP's
+ * tool-generator.js openApiToZod logic so CLI coercion matches MCP behavior on
+ * nullable fields (e.g. domain.create.port = anyOf[number, null]).
+ *
+ * Returns one of: 'string' | 'number' | 'integer' | 'boolean' | 'array' |
+ * 'object' | null (when the type can't be resolved unambiguously).
+ */
+function effectiveType(schema) {
+  if (!schema || typeof schema !== 'object') return null;
+  if (schema.type && schema.type !== 'null') return schema.type;
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    const t = typeof schema.enum[0];
+    if (t === 'string' || t === 'number' || t === 'boolean') return t;
+  }
+  const variants = schema.anyOf || schema.oneOf;
+  if (Array.isArray(variants)) {
+    const nonNull = variants.filter((v) => v && v.type !== 'null');
+    if (nonNull.length === 0) return null;
+    if (nonNull.length === 1) return effectiveType(nonNull[0]);
+    const types = nonNull.map((v) => effectiveType(v));
+    const unique = [...new Set(types.filter((t) => t !== null))];
+    if (unique.length === 1) return unique[0];
+    // Mixed primitives (e.g. string + number) — can't safely coerce.
+    return null;
+  }
+  return null;
+}
+
+function isNullable(schema) {
+  if (!schema || typeof schema !== 'object') return false;
+  if (schema.nullable === true) return true;
+  const variants = schema.anyOf || schema.oneOf;
+  if (Array.isArray(variants)) {
+    return variants.some((v) => v && v.type === 'null');
+  }
+  return false;
+}
+
+// Tight number regex — rejects hex (0x10), scientific (5e10), whitespace, Infinity.
+// JavaScript's Number() accepts all of those, which silently sends surprising
+// numeric values when the user typed something that looks like a typo.
+const NUMERIC_LITERAL = /^-?(\d+\.?\d*|\.\d+)$/;
+
 function coerce(value, schema) {
   if (value === true || value === false) return value;
   if (typeof value !== 'string') return value;
-  if (/^[\[{]/.test(value)) {
-    try { return JSON.parse(value); } catch { /* fall through */ }
+
+  const type = effectiveType(schema);
+
+  // No schema → fall back to permissive legacy parsing. Used by ad-hoc callers
+  // (tests) that pass raw values without a schema.
+  if (!type) {
+    if (/^[\[{]/.test(value)) {
+      try { return JSON.parse(value); } catch { /* fall through */ }
+    }
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (value === 'null') return null;
+    return value;
   }
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  if (value === 'null') return null;
-  if (!schema) return value;
-  const type = schema.type;
-  if (type === 'boolean') return value === '1';
+
+  // Schema-aware: only JSON-parse when the schema actually expects structured
+  // data. Otherwise `--name '[1,2,3]'` would silently send an array where the
+  // API expects a string.
+  if (type === 'array' || type === 'object') {
+    if (/^[\[{]/.test(value)) {
+      try { return JSON.parse(value); } catch { /* fall through */ }
+    }
+    if (type === 'array') return value.split(',').map((s) => s.trim());
+    return value;
+  }
+
+  if (type === 'boolean') {
+    if (value === 'true' || value === '1') return true;
+    if (value === 'false' || value === '0') return false;
+    return value; // let validateValue flag the mismatch
+  }
+
   if (type === 'number' || type === 'integer') {
+    if (!NUMERIC_LITERAL.test(value)) return value;
     const n = Number(value);
-    return Number.isNaN(n) ? value : n;
+    if (!Number.isFinite(n)) return value;
+    if (type === 'integer' && !Number.isInteger(n)) return value;
+    return n;
   }
-  if (type === 'array') {
-    return value.split(',').map((s) => s.trim());
-  }
+
+  // string (or null/unknown) — return as-is. If the schema is nullable and the
+  // user wrote the literal 'null', honor it.
+  if (type === 'string' && value === 'null' && isNullable(schema)) return null;
   return value;
 }
 
 function describeSchema(schema) {
   if (!schema) return 'any';
   if (schema.enum) return `enum(${schema.enum.join('|')})`;
-  if (schema.type === 'array') {
+  const type = effectiveType(schema);
+  if (type === 'array') {
     const items = schema.items ? describeSchema(schema.items) : 'any';
-    return `array<${items}>`;
+    return `array<${items}>${isNullable(schema) ? '?' : ''}`;
   }
-  return schema.type || 'any';
+  if (type) return `${type}${isNullable(schema) ? '?' : ''}`;
+  return 'any';
 }
 
 function printTopHelp(index, instances, defaultInstance) {
@@ -309,6 +433,109 @@ function printActionHelp(domain, action, ep) {
   process.stdout.write(lines.join('\n') + '\n');
 }
 
+/**
+ * Validate a coerced value against its schema. Returns an error string or null.
+ *
+ * Catches three classes of silent-wrong inputs the earlier code accepted:
+ *   1. `--https tru` — coerce can't parse 'tru' as boolean, validator flags it.
+ *   2. `--name --description API` — bare `--name` becomes true, but the field
+ *      expects a string; validator flags the type mismatch.
+ *   3. `--certificateType bogus` — value isn't in the schema's enum.
+ */
+function validateValue(coerced, raw, schema, flagName) {
+  if (!schema || typeof schema !== 'object') return null;
+
+  if (Array.isArray(schema.enum) && schema.enum.length > 0 && !schema.enum.includes(coerced)) {
+    return `--${flagName}: expected one of [${schema.enum.join('|')}], got ${JSON.stringify(coerced)}`;
+  }
+
+  const type = effectiveType(schema);
+  if (!type) return null;
+
+  // null permitted when the schema is nullable (anyOf includes {type:'null'}).
+  if (coerced === null) {
+    return isNullable(schema) ? null : `--${flagName}: expected ${type}, got null`;
+  }
+
+  // Bare flag (`--foo` with no value) lands as boolean true. Allowed only when
+  // the field's actual type is boolean.
+  if (raw === true && type !== 'boolean') {
+    return `--${flagName}: expected ${type} value (bare --${flagName} with no value parses as true)`;
+  }
+
+  if (type === 'string' && typeof coerced !== 'string') {
+    return `--${flagName}: expected string, got ${JSON.stringify(coerced)}`;
+  }
+  if (type === 'boolean' && typeof coerced !== 'boolean') {
+    return `--${flagName}: expected true/false, got ${JSON.stringify(coerced)}`;
+  }
+  if ((type === 'number' || type === 'integer') && typeof coerced !== 'number') {
+    return `--${flagName}: expected ${type}, got ${JSON.stringify(coerced)}`;
+  }
+  if (type === 'object' && (typeof coerced !== 'object' || Array.isArray(coerced))) {
+    return `--${flagName}: expected object, got ${JSON.stringify(coerced)}`;
+  }
+  if (type === 'array' && !Array.isArray(coerced)) {
+    return `--${flagName}: expected array, got ${JSON.stringify(coerced)}`;
+  }
+  return null;
+}
+
+/**
+ * Translate CLI flags into the API request shape for a single endpoint.
+ *
+ * Returns { queryParams, body, missing, errors }:
+ *   - queryParams: Record<paramName, coercedValue> for params declared on the endpoint
+ *   - body: Record<propName, coercedValue> when ep.hasBody, else null
+ *   - missing: array of CLI flag names (post-rename, e.g. 'param_action') for
+ *     required slots that weren't supplied
+ *   - errors: array of validation error strings for flags whose values can't
+ *     be coerced to the schema's expected type
+ *
+ * Reserved field names (`action` / `instance`) are read from the CLI under
+ * `--param_*` (per cliFlagFor) but placed into the request payload under their
+ * original name — matches the MCP server's argKeyFor in src/index.js:128-130.
+ *
+ * Pure function so it's unit-testable without spawning the CLI or hitting the network.
+ */
+function assembleRequest(ep, flags) {
+  const queryParams = {};
+  const errors = [];
+
+  for (const p of ep.params) {
+    const flagName = cliFlagFor(p.name);
+    if (flags[flagName] !== undefined) {
+      const raw = flags[flagName];
+      const v = coerce(raw, p.schema);
+      const err = validateValue(v, raw, p.schema, flagName);
+      if (err) errors.push(err);
+      else queryParams[p.name] = v;
+    }
+  }
+  let body = null;
+  if (ep.hasBody) {
+    body = {};
+    for (const [name, sch] of Object.entries(ep.bodyProps || {})) {
+      const flagName = cliFlagFor(name);
+      if (flags[flagName] !== undefined) {
+        const raw = flags[flagName];
+        const v = coerce(raw, sch);
+        const err = validateValue(v, raw, sch, flagName);
+        if (err) errors.push(err);
+        else body[name] = v;
+      }
+    }
+  }
+  const missing = [];
+  for (const p of ep.params) {
+    if (p.required && queryParams[p.name] === undefined) missing.push(cliFlagFor(p.name));
+  }
+  for (const name of ep.bodyRequired || []) {
+    if (!body || body[name] === undefined) missing.push(cliFlagFor(name));
+  }
+  return { queryParams, body, missing, errors };
+}
+
 function printInstances(instances, defaultInstance) {
   const out = instances.map((i) => ({
     name: i.name,
@@ -326,7 +553,9 @@ function fail(msg, code = 1) {
 async function main() {
   const endpoints = loadEndpoints();
   const index = buildIndex(endpoints);
-  const { globalFlags, positional, flags } = parseArgs(process.argv);
+  const parsed = parseArgs(process.argv);
+  if (parsed.error) fail(parsed.error);
+  const { globalFlags, positional, flags } = parsed;
 
   // Resolve instances early so help text and validation can reference them.
   const instances = parseInstances();
@@ -348,9 +577,21 @@ async function main() {
   }
 
   // `dokploy instances` → JSON listing of configured instances.
-  if (positional[0] === 'instances' && positional.length === 1) {
+  if (positional[0] === 'instances') {
+    if (positional.length > 1) {
+      fail(`Unexpected arguments after 'instances': ${positional.slice(1).join(' ')}`);
+    }
     printInstances(instances, defaultInstance);
     return;
+  }
+
+  // Reject extra positional tokens — `dokploy project create extra --name foo`
+  // used to silently drop 'extra' and proceed.
+  if (positional.length > 2) {
+    fail(
+      `Unexpected extra argument(s): ${positional.slice(2).join(' ')}\n` +
+      `       Usage: dokploy [--instance NAME] <domain> <action> [--key value ...]`
+    );
   }
 
   const [domain, action] = positional;
@@ -372,32 +613,25 @@ async function main() {
     return;
   }
 
-  // Build query + body from flags. Reserved field names (`action`, `instance`)
-  // are read from `--param_*` on the CLI but sent under their original name.
-  const queryParams = {};
-  for (const p of ep.params) {
-    const flagName = cliFlagFor(p.name);
-    if (flags[flagName] !== undefined) {
-      queryParams[p.name] = coerce(flags[flagName], p.schema);
-    }
-  }
-  let body = null;
-  if (ep.hasBody) {
-    body = {};
-    for (const [name, sch] of Object.entries(ep.bodyProps || {})) {
-      const flagName = cliFlagFor(name);
-      if (flags[flagName] !== undefined) {
-        body[name] = coerce(flags[flagName], sch);
-      }
-    }
+  // Reject unknown flags so typos (`--httpss`) or stale skill instructions
+  // fail loudly instead of silently dropping the value.
+  const expectedFlags = new Set(['help', 'list']);
+  for (const p of ep.params) expectedFlags.add(cliFlagFor(p.name));
+  for (const name of Object.keys(ep.bodyProps || {})) expectedFlags.add(cliFlagFor(name));
+  const unknown = Object.keys(flags).filter((k) => !expectedFlags.has(k));
+  if (unknown.length > 0) {
+    fail(
+      `Unknown flag(s): ${unknown.map((k) => `--${k}`).join(', ')}\n` +
+      `       See: dokploy ${domain} ${action} --help`
+    );
   }
 
-  const missing = [];
-  for (const p of ep.params) {
-    if (p.required && queryParams[p.name] === undefined) missing.push(cliFlagFor(p.name));
-  }
-  for (const name of ep.bodyRequired || []) {
-    if (!body || body[name] === undefined) missing.push(cliFlagFor(name));
+  const { queryParams, body, missing, errors } = assembleRequest(ep, flags);
+  if (errors.length > 0) {
+    fail(
+      `Invalid value(s):\n  ${errors.join('\n  ')}\n` +
+      `       See: dokploy ${domain} ${action} --help`
+    );
   }
   if (missing.length > 0) {
     fail(`Missing required parameter(s): ${missing.map((m) => `--${m}`).join(', ')}\n       See: dokploy ${domain} ${action} --help`);
@@ -413,4 +647,21 @@ async function main() {
   }
 }
 
-main().catch((e) => fail(e.stack || e.message));
+if (require.main === module) {
+  main().catch((e) => fail(e.stack || e.message));
+}
+
+module.exports = {
+  CLI_RESERVED,
+  cliFlagFor,
+  actionOf,
+  buildIndex,
+  parseInstances,
+  resolveDefault,
+  parseArgs,
+  coerce,
+  effectiveType,
+  isNullable,
+  assembleRequest,
+  validateValue,
+};

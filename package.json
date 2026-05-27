@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node src/index.js",
     "cli": "node src/cli.js",
-    "test": "node test/run-tests.js",
+    "test": "node test/run-tests.js && node test/run-cli-tests.js",
+    "test:mcp": "node test/run-tests.js",
+    "test:cli": "node test/run-cli-tests.js",
     "verify": "node test/verify-tools.js",
     "parse": "node scripts/parse-spec.js",
     "generate-skill-reference": "node scripts/generate-skill-reference.js"

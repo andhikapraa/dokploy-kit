@@ -1,6 +1,6 @@
 ---
 name: dokploy
-description: Use this skill when the user wants to manage Dokploy infrastructure — projects, applications, databases (Postgres/MySQL/MongoDB/Redis/MariaDB), Docker Compose services, deployments, domains, SSL certificates, backups, servers, organizations — or wants to act across multiple Dokploy instances/environments (e.g. "promote from staging to prod", "deploy on the morvis instance"). Wraps the full Dokploy API (524 endpoints across 48 domains) behind a discoverable `dokploy` CLI.
+description: Use this skill when the user wants to manage Dokploy infrastructure — projects, applications, databases (Postgres/MySQL/MongoDB/Redis/MariaDB), Docker Compose services, deployments, domains, SSL certificates, backups, servers, organizations — or wants to act across multiple Dokploy instances/environments (e.g. "promote from staging to prod", "deploy on the morvis instance"). Wraps the full Dokploy API (526 endpoints across 48 domains) behind a discoverable `dokploy` CLI.
 ---
 
 # Dokploy
@@ -96,30 +96,64 @@ Wrap JSON values in single quotes so the shell doesn't mangle them.
 
 ## Reserved flag names
 
-If a Dokploy body field is named `action` or `instance`, the CLI exposes it as `--param_action` / `--param_instance` (the `action --help` output will note this). Currently no Dokploy v0.29.2 endpoint uses those names, but the rename is in place for forward compatibility.
+If a Dokploy query or body parameter is named `action` or `instance`, the CLI exposes it as `--param_action` / `--param_instance` to avoid clashing with the positional `<action>` and the `--instance` global flag. `--help` annotates the rename with `[API field: <original>]` so it's discoverable.
+
+The current exercised case is `dokploy auditLog all`, whose `action` query param filters by event type:
+
+```bash
+dokploy auditLog all --param_action deploy --limit 50
+```
+
+This sends `?action=deploy&limit=50` to the API. Same pattern applies to any future field named `action` or `instance` on either query or body.
+
+## Dokploy resource hierarchy
+
+Dokploy organizes resources as **project → environment → application/postgres/mysql/etc.** Every create flow starts at the top and threads IDs down. The link from project to environment is `--projectId`; from environment to a resource (app, db, compose) is `--environmentId` — **not** `--projectId`. This is a frequent mistake; if `--help` shows `--environmentId (required)` on a `create` action, you need an environment first.
+
+```
+project create → projectId
+environment create --projectId <id> → environmentId
+application create --environmentId <id> → applicationId
+postgres create --environmentId <id> → postgresId
+```
 
 ## Common workflows
 
-### Create a project and deploy an application
+These examples reflect Dokploy v0.29.5 schemas. **Re-run `dokploy <domain> <action> --help` if anything looks off** — schemas drift between versions, and `--help` is the source of truth. If an example here disagrees with `--help`, trust `--help`.
+
+### Create a project, environment, and application
 
 ```bash
 dokploy project create --name "my-service" --description "Backend"
 # → { projectId: "proj_..." }
 
-dokploy application create --projectId proj_... --name "api" --appName "api-prod"
+dokploy environment create --projectId proj_... --name "production"
+# → { environmentId: "env_..." }
+
+dokploy application create --environmentId env_... --name "api" --appName "api-prod"
 # → { applicationId: "app_..." }
+```
 
-dokploy application saveGitProvider \
-  --applicationId app_... --repository "owner/repo" --branch main
+### Attach a git source (provider-specific)
 
+There are separate actions per git host: `saveGithubProvider`, `saveGitlabProvider`, `saveBitbucketProvider`, `saveGiteaProvider`. The generic `saveGitProvider` is for *custom* git (raw URL) and expects `--customGitUrl`, `--customGitBranch`, `--customGitBuildPath`, `--watchPaths`. Always check `--help` for the provider you need:
+
+```bash
+dokploy application saveGithubProvider --help   # check exact fields
+```
+
+Then deploy:
+
+```bash
 dokploy application deploy --applicationId app_...
 ```
 
 ### Provision Postgres
 
 ```bash
-dokploy postgres create --projectId proj_... --name "db" --appName "db-prod" \
+dokploy postgres create --environmentId env_... --name "db" \
   --databaseName appdb --databaseUser appuser --databasePassword "..."
+# → { postgresId: "pg_..." }
 dokploy postgres deploy --postgresId pg_...
 ```
 
@@ -130,12 +164,14 @@ dokploy domain create --applicationId app_... --host "api.example.com" \
   --https true --certificateType letsencrypt
 ```
 
+`--certificateType` is an enum: `letsencrypt | none | custom`.
+
 ### Inspect logs / status
 
 ```bash
-dokploy deployment all --applicationId app_...
+dokploy deployment all --applicationId app_...   # --applicationId is required
 dokploy application one --applicationId app_...
-dokploy docker getContainers
+dokploy docker getContainers --serverId srv_...  # --serverId optional
 ```
 
 ## Reference
