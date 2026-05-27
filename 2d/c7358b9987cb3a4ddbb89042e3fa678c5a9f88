@@ -1,0 +1,29 @@
+README.md
+  s_317f73428d5cbb::t_d184103b3f2e50 17
+  s_317f73428d5cbb::t_da1a717b14bd7e 3,13
+  s_317f73428d5cbb::t_d519f0561053fd 5
+endpoints-parsed.json
+  s_317f73428d5cbb::t_0dca39869e6796 988-992,1016-1017,1299-1303,1326-1327,1384-1388,1420,1498-1502,1527-1528,1581-1585,1601-1602,4592-4617,5607-5639,18155-18164,18386-18394
+CLAUDE.md
+  s_317f73428d5cbb::t_9f6b96050eccab 4
+skills/dokploy/reference.md
+  s_317f73428d5cbb::t_9b21cfaf13e7c7 5,106,127,149,158
+test/run-tests.js
+  s_317f73428d5cbb::t_2b272ec02096a5 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2dc7358b9987cb3a4ddbb89042e3fa678c5a9f88",
+  "prompts": {},
+  "sessions": {
+    "s_317f73428d5cbb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c3cee9ee-a7e9-406e-b7d5-ec99fc725ce0",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
