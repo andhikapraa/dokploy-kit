@@ -1,6 +1,6 @@
 {
-  "name": "dokploy-kit",
-  "version": "1.0.0",
+  "name": "@prasetya/dokploy-kit",
+  "version": "2.0.0",
   "description": "Two surfaces for AI agents to operate Dokploy infrastructure: a `dokploy` CLI + Claude Agent Skill (recommended), plus an MCP server. Tracks Dokploy v0.29.5, 526 endpoints across 48 grouped tools.",
   "main": "src/index.js",
   "bin": {
@@ -32,6 +32,9 @@
     "url": "https://github.com/andhikapraa/dokploy-kit"
   },
   "keywords": ["dokploy", "mcp", "cli", "agent-skill", "claude", "claude-code", "deployment", "infrastructure", "model-context-protocol"],
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Muhammad Andhika Prasetya",
   "license": "MIT",
   "type": "commonjs",

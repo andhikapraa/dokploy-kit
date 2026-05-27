@@ -16,7 +16,7 @@ The CLI is exposed two ways. Use whichever works, in this order:
 dokploy --help
 
 # 2. Fall back to the npm package alias when `dokploy` is not on PATH
-npx -y dokploy-kit --help
+npx -y @prasetya/dokploy-kit --help
 ```
 
 A one-liner that always works, with no risk of retrying a failed CLI invocation:
@@ -25,13 +25,13 @@ A one-liner that always works, with no risk of retrying a failed CLI invocation:
 if command -v dokploy >/dev/null 2>&1; then
   dokploy "$@"
 else
-  npx -y dokploy-kit "$@"
+  npx -y @prasetya/dokploy-kit "$@"
 fi
 ```
 
-> **Do not** use `... && dokploy "$@" || npx -y dokploy-kit "$@"`. That falls back whenever `dokploy` exits non-zero — including legitimate failures like 4xx API errors or validation rejections — and re-runs the same command through `npx`, which is dangerous for destructive operations.
+> **Do not** use `... && dokploy "$@" || npx -y @prasetya/dokploy-kit "$@"`. That falls back whenever `dokploy` exits non-zero — including legitimate failures like 4xx API errors or validation rejections — and re-runs the same command through `npx`, which is dangerous for destructive operations.
 
-Examples below use `dokploy` for brevity. If you get `command not found`, substitute `npx -y dokploy-kit` (same flags, same output).
+Examples below use `dokploy` for brevity. If you get `command not found`, substitute `npx -y @prasetya/dokploy-kit` (same flags, same output).
 
 ## Mental model
 

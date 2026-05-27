@@ -21,16 +21,18 @@ npx skills add andhikapraa/dokploy-kit -a claude-code -g
 You'll also need the `dokploy` CLI binary on `PATH`. Three options:
 
 ```bash
-# 1. Install from npm (once published) — zero clone, zero PATH setup
-npm install -g dokploy-kit
+# 1. Install from npm — zero clone, zero PATH setup
+npm install -g @prasetya/dokploy-kit
 
 # 2. Use without installing — npx fetches+caches the package each time it isn't found
 #    The skill itself falls back to this if `dokploy` isn't on PATH.
-npx -y dokploy-kit --help
+npx -y @prasetya/dokploy-kit --help
 
 # 3. Develop locally — clone the repo and link the bin
 git clone https://github.com/andhikapraa/dokploy-kit && cd dokploy-kit && npm install && npm link
 ```
+
+> **Pre-publish note:** options 1 and 2 require the package to be published to npm under `@prasetya/dokploy-kit`. Until then, only option 3 (clone + link) is operational. The `npx skills add ...` step above always works from GitHub regardless of npm publish status.
 
 Set auth env (`DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY` for single-instance, or `DOKPLOY_INSTANCES` JSON for multi). See [Path A](#path-a--cli--agent-skill-recommended-for-claude-code) below for the full setup.
 
