@@ -7,6 +7,26 @@ description: Use this skill when the user wants to manage Dokploy infrastructure
 
 The `dokploy` CLI is a thin wrapper over the Dokploy API. Invoke it via Bash. **Don't try to memorize endpoints — discover them via `--help`.**
 
+## CLI invocation
+
+The CLI is exposed two ways. Use whichever works, in this order:
+
+```bash
+# 1. Prefer the local binary if installed (faster, no npm fetch)
+dokploy --help
+
+# 2. Fall back to the npm package alias when `dokploy` is not on PATH
+npx -y dokploy-kit --help
+```
+
+A one-liner that always works:
+
+```bash
+command -v dokploy >/dev/null && dokploy "$@" || npx -y dokploy-kit "$@"
+```
+
+Examples below use `dokploy` for brevity. If you get `command not found`, substitute `npx -y dokploy-kit` (same flags, same output).
+
 ## Mental model
 
 Every command is shaped:

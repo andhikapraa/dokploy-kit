@@ -5,8 +5,18 @@
   "main": "src/index.js",
   "bin": {
     "dokploy-mcp": "src/index.js",
-    "dokploy": "src/cli.js"
+    "dokploy": "src/cli.js",
+    "dokploy-kit": "src/cli.js"
   },
+  "files": [
+    "src/",
+    "scripts/",
+    "endpoints-parsed.json",
+    "skills/",
+    ".claude-plugin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "cli": "node src/cli.js",
