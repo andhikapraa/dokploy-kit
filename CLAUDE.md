@@ -1,7 +1,7 @@
 # Dokploy Manager - MCP Server
 
 MCP server exposing the Dokploy API as grouped tools for Claude Code.
-Currently tracks Dokploy **v0.29.2** (524 endpoints across 48 tools).
+Currently tracks Dokploy **v0.29.5** (526 endpoints across 48 tools).
 
 ## Architecture
 

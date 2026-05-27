@@ -34,7 +34,7 @@ const tools = generateTools(endpoints);
 assert(tools.length === 48, `Generated ${tools.length} tools (expected 48)`);
 
 const totalActions = tools.reduce((sum, t) => sum + t.actionNames.length, 0);
-assert(totalActions === 524, `Total actions: ${totalActions} (expected 524)`);
+assert(totalActions === 526, `Total actions: ${totalActions} (expected 526)`);
 
 // Single-instance mode (default): no 'instance' param on the shape
 for (const tool of tools.slice(0, 3)) {

@@ -1,8 +1,8 @@
 # dokploy-mcp
 
-> A Model Context Protocol (MCP) server that wraps the [Dokploy](https://dokploy.com) API, exposing **524 endpoints across 48 grouped tools** so AI agents like Claude Code can deploy apps, manage databases, configure domains, and operate Dokploy infrastructure conversationally.
+> A Model Context Protocol (MCP) server that wraps the [Dokploy](https://dokploy.com) API, exposing **526 endpoints across 48 grouped tools** so AI agents like Claude Code can deploy apps, manage databases, configure domains, and operate Dokploy infrastructure conversationally.
 
-Tracks **Dokploy v0.29.2**.
+Tracks **Dokploy v0.29.5**.
 
 ## Why
 
@@ -10,11 +10,11 @@ The Dokploy REST API has ~500 endpoints — too many to register as individual M
 
 ## Features
 
-- ✅ **Full Dokploy v0.29.2 coverage** — 524 endpoints, auto-derived from the OpenAPI spec
+- ✅ **Full Dokploy v0.29.5 coverage** — 526 endpoints, auto-derived from the OpenAPI spec
 - ✅ **Multi-instance** — point a single MCP server at multiple Dokploy installs and route per-call (`instance: "main"` vs `instance: "staging"`)
 - ✅ **Self-updating** — when Dokploy ships a new version, run `npm run parse` to regenerate tool definitions from the live spec. No manual code per endpoint.
 - ✅ **Zero runtime spec dependency** — the parsed endpoints are committed to the repo. Production runs don't fetch anything from Dokploy at startup.
-- ✅ **2993-test suite** covering path formats, action mapping, schema generation, and multi-instance routing
+- ✅ **3003-test MCP suite** + **175-test CLI suite** covering path formats, action mapping, schema generation, multi-instance routing, and CLI parity
 
 ## Quick start
 

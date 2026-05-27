@@ -2,7 +2,7 @@
 
 Auto-generated from `endpoints-parsed.json`. Do not edit by hand; run `npm run generate-skill-reference`.
 
-48 domains, 524 actions total.
+48 domains, 526 actions total.
 
 Run `dokploy <domain> <action> --help` for parameter details on any specific action.
 
@@ -103,7 +103,7 @@ Run `dokploy <domain> <action> --help` for parameter details on any specific act
 - `dokploy cluster getNodes` — GET /cluster.getNodes
 - `dokploy cluster removeWorker` — POST /cluster.removeWorker
 
-## compose (30)
+## compose (31)
 
 - `dokploy compose cancelDeployment` — POST /compose.cancelDeployment
 - `dokploy compose cleanQueues` — POST /compose.cleanQueues
@@ -124,6 +124,7 @@ Run `dokploy <domain> <action> --help` for parameter details on any specific act
 - `dokploy compose loadServices` — GET /compose.loadServices
 - `dokploy compose move` — POST /compose.move
 - `dokploy compose one` — GET /compose.one
+- `dokploy compose previewTemplate` — POST /compose.previewTemplate
 - `dokploy compose processTemplate` — POST /compose.processTemplate
 - `dokploy compose randomizeCompose` — POST /compose.randomizeCompose
 - `dokploy compose readLogs` — GET /compose.readLogs
@@ -145,7 +146,7 @@ Run `dokploy <domain> <action> --help` for parameter details on any specific act
 - `dokploy customRole remove` — POST /customRole.remove
 - `dokploy customRole update` — POST /customRole.update
 
-## deployment (8)
+## deployment (9)
 
 - `dokploy deployment all` — GET /deployment.all
 - `dokploy deployment allByCompose` — GET /deployment.allByCompose
@@ -154,6 +155,7 @@ Run `dokploy <domain> <action> --help` for parameter details on any specific act
 - `dokploy deployment allCentralized` — GET /deployment.allCentralized
 - `dokploy deployment killProcess` — POST /deployment.killProcess
 - `dokploy deployment queueList` — GET /deployment.queueList
+- `dokploy deployment readLogs` — GET /deployment.readLogs
 - `dokploy deployment removeDeployment` — POST /deployment.removeDeployment
 
 ## destination (6)
