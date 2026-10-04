@@ -1,0 +1,14 @@
+.gitignore
+  h_690cf8a536e111 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "031c3ff5c0fc14c8c59d58c829bfe9ad2e8052c7",
+  "prompts": {},
+  "humans": {
+    "h_690cf8a536e111": {
+      "author": "Muhammad Andhika Prasetya <andhikapraa@gmail.com>"
+    }
+  }
+}
