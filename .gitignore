@@ -36,3 +36,4 @@ secrets/
 .vscode/
 .idea/
 *.swp
+.gstack/
