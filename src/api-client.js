@@ -15,7 +15,9 @@ class DokployClient {
    * @param {string} method - HTTP method
    * @param {Object} queryParams - Query parameters
    * @param {Object|null} body - Request body for POST/PUT
-   * @returns {Promise<Object>} Response data
+   * @returns {Promise<Object|string|null>} Parsed JSON, raw text for non-JSON
+   *   bodies, or null when the response body is empty (Dokploy procedures that
+   *   return void respond 200 with an empty body).
    */
   async request(path, method = 'GET', queryParams = {}, body = null) {
     const url = new URL(`${this.baseUrl}${path}`);
@@ -41,18 +43,17 @@ class DokployClient {
 
     const response = await fetch(url.toString(), options);
 
-    let data;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
+    const data = parseBody(
+      await response.text(),
+      response.headers.get('content-type') || ''
+    );
 
     if (!response.ok) {
-      const errorMsg = typeof data === 'object'
-        ? data.message || JSON.stringify(data)
-        : data;
+      const errorMsg = data === null
+        ? response.statusText || '(empty response body)'
+        : typeof data === 'object'
+          ? data.message || JSON.stringify(data)
+          : data;
       throw new Error(`Dokploy API error (${response.status}): ${errorMsg}`);
     }
 
@@ -60,4 +61,19 @@ class DokployClient {
   }
 }
 
-module.exports = { DokployClient };
+/**
+ * Decode a response body. Reading text first (instead of response.json())
+ * lets an empty body on a JSON content-type resolve to null rather than
+ * throwing "Unexpected end of JSON input" after a successful request.
+ */
+function parseBody(text, contentType) {
+  if (text.trim() === '') return null;
+  if (!contentType.includes('application/json')) return text;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+module.exports = { DokployClient, parseBody };

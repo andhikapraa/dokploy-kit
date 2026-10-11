@@ -6,7 +6,8 @@
  */
 
 const { generateTools } = require('../src/tool-generator.js');
-const { DokployClient } = require('../src/api-client.js');
+const http = require('node:http');
+const { DokployClient, parseBody } = require('../src/api-client.js');
 const endpoints = require('../endpoints-parsed.json');
 const { z } = require('zod');
 
@@ -154,9 +155,75 @@ for (const tool of tools) {
   }
 }
 
-// Summary
-console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-console.log(`${'='.repeat(50)}`);
+// Test 9: Response body parsing
+section('Response Body Parsing');
 
-process.exit(failed > 0 ? 1 : 0);
+assert(parseBody('', 'application/json') === null, 'Empty JSON body parses to null');
+assert(parseBody('  \n', 'application/json') === null, 'Whitespace-only body parses to null');
+assert(parseBody('', 'text/plain') === null, 'Empty text body parses to null');
+assert(parseBody('true', 'application/json') === true, 'JSON scalar body parses');
+assert(parseBody('{"a":1}', 'application/json; charset=utf-8').a === 1, 'JSON object body parses');
+assert(parseBody('{bad', 'application/json') === '{bad', 'Malformed JSON falls back to raw text');
+assert(parseBody('{"a":1}', 'text/plain') === '{"a":1}', 'Non-JSON content-type stays raw text');
+
+// Test 10: request() against a local server (empty bodies, errors)
+async function testRequests() {
+  section('API Client Requests');
+
+  const routes = {
+    '/void.ok': [200, 'application/json', ''],
+    '/json.ok': [200, 'application/json', '{"id":"x1"}'],
+    '/text.ok': [200, 'text/plain', 'hello'],
+    '/json.err': [400, 'application/json', '{"message":"Input validation failed"}'],
+    '/empty.err': [500, 'application/json', ''],
+  };
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const url = req.url.replace(/^\/api/, ''); // client base URL ends in /api
+    let body = '';
+    req.on('data', (ch) => { body += ch; });
+    req.on('end', () => {
+      seen.push({ url, method: req.method, key: req.headers['x-api-key'], body });
+      const [status, type, payload] = routes[url.split('?')[0]] || [404, 'text/plain', 'nope'];
+      res.writeHead(status, { 'Content-Type': type });
+      res.end(payload);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  // Trailing slash also checks that the constructor normalizes the base URL.
+  const c = new DokployClient(`http://127.0.0.1:${server.address().port}/api/`, 'k1');
+
+  try {
+    const v = await c.request('/void.ok', 'POST', {}, { applicationId: 'a1' });
+    assert(v === null, 'Empty 200 JSON body resolves to null (no "Unexpected end of JSON input")');
+    const last = seen[seen.length - 1];
+    assert(last.method === 'POST' && last.key === 'k1', 'POST sends x-api-key header');
+    assert(last.body === '{"applicationId":"a1"}', 'POST sends JSON body');
+
+    const j = await c.request('/json.ok', 'GET', { id: 'x1', empty: '' });
+    assert(j && j.id === 'x1', 'JSON body is parsed');
+    assert(seen[seen.length - 1].url === '/json.ok?id=x1', 'Empty query values are omitted');
+
+    assert((await c.request('/text.ok')) === 'hello', 'Text body is returned raw');
+
+    let msg = '';
+    try { await c.request('/json.err', 'POST', {}, {}); } catch (e) { msg = e.message; }
+    assert(msg === 'Dokploy API error (400): Input validation failed', 'JSON error surfaces message');
+
+    msg = '';
+    try { await c.request('/empty.err', 'POST', {}, {}); } catch (e) { msg = e.message; }
+    assert(/^Dokploy API error \(500\): /.test(msg) && !/JSON/.test(msg), `Empty error body still reports status (${msg})`);
+  } finally {
+    server.close();
+  }
+}
+
+testRequests()
+  .catch((e) => assert(false, `request tests crashed: ${e.message}`))
+  .finally(() => {
+    // Summary
+    console.log(`\n${'='.repeat(50)}`);
+    console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+    console.log(`${'='.repeat(50)}`);
+    process.exit(failed > 0 ? 1 : 0);
+  });

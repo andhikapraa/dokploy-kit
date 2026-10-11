@@ -1,6 +1,6 @@
 {
   "name": "dokploy-kit",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Two surfaces for AI agents to operate Dokploy infrastructure: a `dokploy` CLI + Claude Agent Skill (recommended), plus an MCP server. Tracks Dokploy v0.29.5, 526 endpoints across 48 grouped tools.",
   "main": "src/index.js",
   "bin": {
