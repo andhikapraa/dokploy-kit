@@ -111,6 +111,7 @@ function saveInstance(inst, { makeDefault = false } = {}) {
 // see a half-written file and an interrupted write cannot wipe saved logins.
 function writeConfigFile(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  removeStaleTemps(file);
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   try {
     // 'wx' fails if the name exists, so the 0600 mode always applies.
@@ -121,6 +122,18 @@ function writeConfigFile(file, data) {
   }
 }
 
+// A hard kill between write and rename can leave a temp file holding the key.
+// Sweep `<config>.*.tmp` siblings on every write and on logout.
+function removeStaleTemps(file) {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}.`;
+  let entries = [];
+  try { entries = fs.readdirSync(dir); } catch { return; }
+  for (const f of entries) {
+    if (f.startsWith(prefix) && f.endsWith('.tmp')) fs.rmSync(path.join(dir, f), { force: true });
+  }
+}
+
 /**
  * Remove one instance, or all when name is omitted. Removing all deletes the
  * file even when it is corrupt, so a bad file never strands a key on disk.
@@ -128,6 +141,7 @@ function writeConfigFile(file, data) {
 function removeInstance(name) {
   const file = configPath();
   if (!name) {
+    removeStaleTemps(file);
     if (!fs.existsSync(file)) return { file, removed: [] };
     let removed = ['(unreadable config)'];
     try { removed = readConfigFile(file).instances.map((i) => i.name); } catch { /* still delete */ }

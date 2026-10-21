@@ -55,11 +55,11 @@ dokploy --help
 ```
 
 The Auth section will say one of:
-- *"Not logged in."* — ask the user to run `dokploy login` in a separate terminal window. It prompts for the panel URL and the API key (input hidden), checks them, and saves them. It needs a real terminal: Claude Code's `!` prefix and agent Bash tools have no TTY, so the prompt cannot run there. If the agent must run the login, the user first exports `DOKPLOY_API_KEY` in their own shell and starts the agent from that shell; the agent then runs `dokploy login --url <panel-url>`, which reads the key from the environment. Never ask for the API key in chat, never pass it as a command argument, and never write it to a file.
+- *"Not logged in."* — ask the user to run `dokploy login` in a separate terminal window. It prompts for the panel URL and the API key (input hidden), checks them, and saves them. It needs a real terminal: Claude Code's `!` prefix and agent Bash tools have no TTY, so the prompt cannot run there. If the agent must run the login, the user first exports `DOKPLOY_API_KEY` in their own shell and starts the agent from that shell; the agent then runs `dokploy login --url <panel-url>`, which reads the key from the environment. Either way, login stores the key in its mode-600 config file; that is the one place it should live. Never ask for the API key in chat, never pass it as a command argument, and never put it in any other file.
 - *"Single-instance mode. Configured: default → https://..."* — don't pass `--instance`.
 - *"Configured instances (N): main (default) → ..., staging → ..."* — pass `--instance NAME` on every call that isn't the default.
 
-The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `~/.config/dokploy/config.json`; `DOKPLOY_BASE_URL`/`DOKPLOY_API_KEY` or `DOKPLOY_INSTANCES` env vars override it when set. `dokploy logout [--name NAME]` removes a saved login.
+The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `$DOKPLOY_CONFIG` if set, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json` (`dokploy login --help` prints the path in use); `DOKPLOY_BASE_URL`/`DOKPLOY_API_KEY` or `DOKPLOY_INSTANCES` env vars override it when set. `dokploy logout [--name NAME]` removes a saved login.
 
 For a machine-readable list of instances (e.g. when scripting or when the user names an instance you want to validate):
 

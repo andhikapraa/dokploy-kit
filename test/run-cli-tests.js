@@ -763,8 +763,12 @@ section('Integration: login / logout against a local fake Dokploy');
 
   rr = spawnCli(['logout', '--name', 'second']);
   assert(rr.status === 0 && readCfg().instances.length === 1, 'logout --name removes one instance');
+  // A temp file stranded by a hard kill mid-write must not survive logout.
+  const stranded = `${TEST_CONFIG}.999.1.tmp`;
+  fs.writeFileSync(stranded, '{"instances":[{"apiKey":"good-key"}]}');
   rr = spawnCli(['logout']);
   assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout removes the config file');
+  assert(!fs.existsSync(stranded), 'logout also removes a stranded temp file');
 
   rr = spawnCli(['login', '--url', 'http://127.0.0.1:1'], { DOKPLOY_API_KEY: 'good-key' });
   assert(rr.status === 1 && /Could not reach/.test(rr.stderr), 'unreachable URL gives a reachability hint');
