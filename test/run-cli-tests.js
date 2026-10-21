@@ -784,6 +784,60 @@ section('Integration: login / logout against a local fake Dokploy');
   assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout --name of the last instance removes the config');
   assert(!fs.existsSync(stranded), 'logout --name also removes a stranded temp file');
 
+  // Only names writeConfigFile creates are swept.
+  const userTmp = `${TEST_CONFIG}.backup.tmp`;
+  fs.writeFileSync(userTmp, 'keep me');
+  rr = spawnCli(['logout']);
+  assert(fs.existsSync(userTmp), 'logout leaves unrelated *.tmp files alone');
+  fs.rmSync(userTmp, { force: true });
+
+  // Concurrent saves must not drop each other's instance. Writers start at the
+  // same instant and call saveInstance in a loop, so read-modify-write races
+  // show up reliably without the lock.
+  const { spawn: spawnAsync } = require('child_process');
+  const configModule = path.join(__dirname, '..', 'src', 'config.js');
+  const startAt = Date.now() + 1500;
+  const writers = 8, perWriter = 15;
+  const saverSrc = (w) => `
+    const c = require(${JSON.stringify(configModule)});
+    while (Date.now() < ${startAt}) {}
+    for (let i = 0; i < ${perWriter}; i++) c.saveInstance({ name: 'w${w}-' + i, baseUrl: 'https://x/api', apiKey: 'k' });
+  `;
+  const children = Array.from({ length: writers }, (_, w) => spawnAsync('node', ['-e', saverSrc(w)], {
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, DOKPLOY_CONFIG: TEST_CONFIG },
+    stdio: 'ignore',
+  }));
+  let exited = 0;
+  children.forEach((ch) => ch.on('exit', () => { exited++; }));
+  const waitUntil = Date.now() + 30_000;
+  while (exited < writers && Date.now() < waitUntil) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
+  const concurrent = readCfg();
+  assert(concurrent.instances.length === writers * perWriter, `concurrent saves keep every instance (${concurrent.instances.length}/${writers * perWriter})`);
+  assert(!fs.existsSync(`${TEST_CONFIG}.lock`), 'lock file is released after concurrent saves');
+  spawnCli(['logout']);
+
+  // A redirect from the panel must not carry the API key to another origin.
+  const redirFile = path.join(TEST_CONFIG_DIR, 'redir-port');
+  const leakFile = path.join(TEST_CONFIG_DIR, 'leaked');
+  const redirSrc = `
+    const http = require('http'), fs = require('fs');
+    const other = http.createServer((q, r) => { fs.writeFileSync(${JSON.stringify(leakFile)}, String(q.headers['x-api-key'] || '')); r.writeHead(200, {'Content-Type':'application/json'}); r.end('[]'); });
+    other.listen(0, '127.0.0.1', () => {
+      const op = other.address().port;
+      const s = http.createServer((q, r) => { r.writeHead(302, { Location: 'http://localhost:' + op + q.url }); r.end(); });
+      s.listen(0, '127.0.0.1', () => fs.writeFileSync(${JSON.stringify(redirFile)}, String(s.address().port)));
+    });
+  `;
+  const redir = spawnAsync('node', ['-e', redirSrc], { stdio: 'ignore' });
+  process.on('exit', () => { try { redir.kill(); } catch { /* gone */ } });
+  const rwait = Date.now() + 10_000;
+  while (!fs.existsSync(redirFile) && Date.now() < rwait) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
+  rr = spawnCli(['login', '--url', `http://127.0.0.1:${fs.readFileSync(redirFile, 'utf8')}`], { DOKPLOY_API_KEY: 'good-key' });
+  assert(rr.status === 1 && /redirect/i.test(rr.stderr), 'login refuses a redirecting panel URL');
+  assert(!fs.existsSync(leakFile), 'the API key never reaches the redirect target');
+  assert(!fs.existsSync(TEST_CONFIG), 'nothing is saved after a refused redirect');
+  redir.kill();
+
   rr = spawnCli(['login', '--url', 'http://127.0.0.1:1'], { DOKPLOY_API_KEY: 'good-key' });
   assert(rr.status === 1 && /Could not reach/.test(rr.stderr), 'unreachable URL gives a reachability hint');
 

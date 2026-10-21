@@ -35,13 +35,24 @@ class DokployClient {
       'Accept': 'application/json',
     };
 
-    const options = { method, headers };
+    // fetch keeps custom headers on redirects, including cross-origin ones, so a
+    // redirecting host would receive the API key. Dokploy's API does not
+    // redirect, so refuse redirects and report where it tried to go instead.
+    const options = { method, headers, redirect: 'manual' };
 
     if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(body);
     }
 
     const response = await fetch(url.toString(), options);
+
+    if (response.status >= 300 && response.status < 400) {
+      const target = response.headers.get('location') || '(no Location header)';
+      throw new Error(
+        `Dokploy API error (${response.status}): refusing to follow redirect to ${target}. ` +
+        'Point the base URL at the final address (for example https:// instead of http://).'
+      );
+    }
 
     const data = parseBody(
       await response.text(),

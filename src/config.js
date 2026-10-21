@@ -96,6 +96,10 @@ function loadInstances() {
  */
 function saveInstance(inst, { makeDefault = false } = {}) {
   const file = configPath();
+  return withConfigLock(file, () => saveInstanceLocked(file, inst, makeDefault));
+}
+
+function saveInstanceLocked(file, inst, makeDefault) {
   const current = readConfigFile(file) || { instances: [] };
   const others = current.instances.filter((i) => i.name !== inst.name);
   const instances = [...others, { name: inst.name, baseUrl: inst.baseUrl, apiKey: inst.apiKey }];
@@ -131,8 +135,12 @@ function removeStaleTemps(file) {
   let entries = [];
   try { entries = fs.readdirSync(dir); } catch { return; }
   for (const f of entries) {
-    if (!f.startsWith(prefix) || !f.endsWith('.tmp')) continue;
-    const pid = Number(f.slice(prefix.length).split('.')[0]);
+    // Match only names writeConfigFile creates, so files like
+    // `config.json.backup.tmp` are never touched.
+    if (!f.startsWith(prefix)) continue;
+    const m = /^(\d+)\.\d+\.tmp$/.exec(f.slice(prefix.length));
+    if (!m) continue;
+    const pid = Number(m[1]);
     if (pid !== process.pid && isProcessAlive(pid)) continue;
     fs.rmSync(path.join(dir, f), { force: true });
   }
@@ -149,6 +157,33 @@ function isProcessAlive(pid) {
  */
 function removeInstance(name) {
   const file = configPath();
+  return withConfigLock(file, () => removeInstanceLocked(file, name));
+}
+
+// Serialize read-modify-write across processes with an exclusive lock file, so
+// two concurrent logins cannot both start from the same snapshot and drop one
+// instance. A lock left by a dead process is taken over.
+function withConfigLock(file, fn) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let owner = NaN;
+      try { owner = Number(fs.readFileSync(lock, 'utf8')); } catch { /* lock just released */ }
+      if (!isProcessAlive(owner)) { fs.rmSync(lock, { force: true }); continue; }
+      if (Date.now() > deadline) throw new Error(`Config is locked by process ${owner} (${lock}). Retry, or delete the lock file if that process is gone.`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  try { return fn(); } finally { fs.rmSync(lock, { force: true }); }
+}
+
+function removeInstanceLocked(file, name) {
   // Every logout path, including removing the last named instance, sweeps temps.
   removeStaleTemps(file);
   if (!name) {
