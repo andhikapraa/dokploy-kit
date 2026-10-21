@@ -106,12 +106,19 @@ function saveInstance(inst, { makeDefault = false } = {}) {
   return { file, defaultInstance, instances };
 }
 
-// The only writer of the config file: 0700 directory, 0600 file.
+// The only writer of the config file: 0700 directory, 0600 file. Writes a
+// fresh 0600 temp file beside the target and renames it over, so readers never
+// see a half-written file and an interrupted write cannot wipe saved logins.
 function writeConfigFile(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
-  // writeFileSync keeps the old mode when the file already exists.
-  try { fs.chmodSync(file, 0o600); } catch { /* best effort on Windows */ }
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    // 'wx' fails if the name exists, so the 0600 mode always applies.
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 /**

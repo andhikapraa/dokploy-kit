@@ -751,7 +751,13 @@ section('Integration: login / logout against a local fake Dokploy');
   rr = spawnCli(['project', 'all']);
   assert(rr.status === 0 && rr.stdout.trim() === '[]', 'API calls use the saved login with no env vars');
 
+  // A rewrite must restore 0600 on a loosened file and leave no temp files behind.
+  if (process.platform !== 'win32') fs.chmodSync(TEST_CONFIG, 0o644);
   rr = spawnCli(['login', '--url', panel, '--name', 'second'], { DOKPLOY_API_KEY: 'good-key' });
+  if (process.platform !== 'win32') {
+    assert((fs.statSync(TEST_CONFIG).mode & 0o777) === 0o600, 'rewrite restores mode 600 on a loosened file');
+  }
+  assert(!fs.readdirSync(TEST_CONFIG_DIR).some((f) => f.endsWith('.tmp')), 'atomic write leaves no temp files');
   const two = readCfg();
   assert(rr.status === 0 && two.instances.length === 2 && two.defaultInstance === 'default', 'second login adds an instance and keeps the default');
 

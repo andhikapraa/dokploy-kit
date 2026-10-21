@@ -149,14 +149,14 @@ async function cmdLogin(flags) {
   }
   if (!rawUrl) {
     if (!process.stdin.isTTY) {
-      fail('--url is required when stdin is not a terminal. Run `dokploy login` in a terminal window, or pipe the key: dokploy login --url URL < key.txt');
+      fail('--url is required when stdin is not a terminal. Run `dokploy login` in a terminal window, or export DOKPLOY_API_KEY in your shell and run: dokploy login --url URL');
     }
     rawUrl = await prompt('Dokploy panel URL (e.g. http://203.0.113.7:3000): ');
   }
   let baseUrl;
   try { baseUrl = config.normalizeBaseUrl(rawUrl); } catch (e) { fail(e.message); }
   if (!apiKey) {
-    if (!process.stdin.isTTY) fail('No API key: run `dokploy login` in a terminal window, or pipe it: dokploy login --url URL < key.txt');
+    if (!process.stdin.isTTY) fail('No API key: run `dokploy login` in a terminal window, or export DOKPLOY_API_KEY in your shell and run: dokploy login --url URL');
     apiKey = await prompt('API key (input hidden): ', { hidden: true });
   }
   if (!apiKey) fail('API key is empty');

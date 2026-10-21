@@ -130,7 +130,7 @@ printf '%s\n' "$KEY" | dokploy login --url https://your-dokploy-host   # non-int
 
 The key is never accepted as a flag, so it stays out of shell history and process lists. The URL may be the panel address (`http://203.0.113.7:3000`); `/api` is added for you.
 
-The prompt needs a real terminal. Claude Code's `!` prefix and agent Bash tools run without one, so from inside an agent, save the key to a file in your editor and pipe it: `dokploy login --url https://your-dokploy-host < key.txt`, then delete the file.
+The prompt needs a real terminal. Claude Code's `!` prefix and agent Bash tools run without one, so run `dokploy login` in a separate terminal window. To let an agent run it instead, export `DOKPLOY_API_KEY` in your own shell, start the agent from that shell, and have it run `dokploy login --url https://your-dokploy-host`; the key is read from the environment and never touches a file.
 
 Saved login, multiple instances (pick per-call with `--instance NAME`):
 

@@ -55,7 +55,7 @@ dokploy --help
 ```
 
 The Auth section will say one of:
-- *"Not logged in."* — ask the user to run `dokploy login` in a separate terminal window. It prompts for the panel URL and the API key (input hidden), checks them, and saves them. It needs a real terminal: Claude Code's `!` prefix and agent Bash tools have no TTY, so the prompt cannot run there. Without a separate terminal, the user can save the key to a file in their editor and run `dokploy login --url <panel-url> < key.txt`, then delete the file. Never ask for the API key in chat and never pass it as a command argument.
+- *"Not logged in."* — ask the user to run `dokploy login` in a separate terminal window. It prompts for the panel URL and the API key (input hidden), checks them, and saves them. It needs a real terminal: Claude Code's `!` prefix and agent Bash tools have no TTY, so the prompt cannot run there. If the agent must run the login, the user first exports `DOKPLOY_API_KEY` in their own shell and starts the agent from that shell; the agent then runs `dokploy login --url <panel-url>`, which reads the key from the environment. Never ask for the API key in chat, never pass it as a command argument, and never write it to a file.
 - *"Single-instance mode. Configured: default → https://..."* — don't pass `--instance`.
 - *"Configured instances (N): main (default) → ..., staging → ..."* — pass `--instance NAME` on every call that isn't the default.
 
