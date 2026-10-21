@@ -11,7 +11,9 @@
  *   dokploy <domain> <action> --help     # show params for an action
  *   dokploy instances                    # list configured instances
  *
- * Auth: DOKPLOY_API_KEY + DOKPLOY_BASE_URL, or DOKPLOY_INSTANCES + --instance.
+ * Auth: `dokploy login` saves instances to ~/.config/dokploy/config.json.
+ * Env vars (DOKPLOY_API_KEY + DOKPLOY_BASE_URL, or DOKPLOY_INSTANCES) take
+ * precedence when set. See src/config.js for the resolution order.
  *
  * Behavioral parity with src/index.js (the MCP server):
  *   - Query OR body params named `action` or `instance` are exposed as
@@ -30,6 +32,7 @@
 const path = require('path');
 const fs = require('fs');
 const { DokployClient } = require('./api-client.js');
+const config = require('./config.js');
 
 const ENDPOINTS_PATH = path.join(__dirname, '..', 'endpoints-parsed.json');
 
@@ -63,48 +66,152 @@ function buildIndex(endpoints) {
   return byTag;
 }
 
+// Default instance saved by `dokploy login`, recorded by parseInstances().
+let savedDefaultInstance;
+
 /**
- * Parse + validate DOKPLOY_INSTANCES (or fall back to single-instance vars).
- * Rejects duplicate names — matches src/index.js:42-46.
+ * Resolve instances from env vars, then the saved config file.
+ * Rejects duplicate names — matches src/index.js.
  */
-function parseInstances() {
-  const raw = process.env.DOKPLOY_INSTANCES;
-  if (raw) {
-    let parsed;
-    try { parsed = JSON.parse(raw); }
-    catch (e) { fail(`Invalid DOKPLOY_INSTANCES JSON: ${e.message}`); }
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      fail('DOKPLOY_INSTANCES must be a non-empty JSON array');
-    }
-    const seen = new Set();
-    for (const inst of parsed) {
-      if (!inst || typeof inst !== 'object') {
-        fail('Each DOKPLOY_INSTANCES entry must be an object');
-      }
-      const missing = ['name', 'baseUrl', 'apiKey'].filter((k) => !inst[k]);
-      if (missing.length > 0) {
-        const label = inst.name ? `'${inst.name}'` : 'unnamed entry';
-        fail(`DOKPLOY_INSTANCES ${label} is missing: ${missing.join(', ')}`);
-      }
-      if (seen.has(inst.name)) {
-        fail(`Duplicate instance name: ${inst.name}`);
-      }
-      seen.add(inst.name);
-    }
-    return parsed;
+const NOT_LOGGED_IN = 'Not logged in. Run `dokploy login` (or set DOKPLOY_BASE_URL and DOKPLOY_API_KEY).';
+
+// With `optional`, returns [] when nothing is configured, so discovery commands
+// (--list, help) work before login. Malformed config still fails loudly.
+function parseInstances({ optional = false } = {}) {
+  let resolved;
+  try { resolved = config.loadInstances(); } catch (e) { fail(e.message); }
+  if (!resolved) {
+    if (optional) return [];
+    fail(NOT_LOGGED_IN);
   }
-  const apiKey = process.env.DOKPLOY_API_KEY || '';
-  const baseUrl = process.env.DOKPLOY_BASE_URL || '';
-  if (!baseUrl) fail('Set DOKPLOY_BASE_URL (or DOKPLOY_INSTANCES).');
-  return [{ name: 'default', baseUrl, apiKey }];
+  savedDefaultInstance = resolved.defaultInstance;
+  return resolved.instances;
 }
 
 function resolveDefault(instances) {
   const requested = process.env.DOKPLOY_DEFAULT_INSTANCE;
   if (requested && !instances.some((i) => i.name === requested)) {
-    fail(`DOKPLOY_DEFAULT_INSTANCE='${requested}' not found in DOKPLOY_INSTANCES`);
+    fail(`DOKPLOY_DEFAULT_INSTANCE='${requested}' not found in configured instances`);
   }
-  return requested || instances[0].name;
+  if (requested) return requested;
+  if (savedDefaultInstance && instances.some((i) => i.name === savedDefaultInstance)) return savedDefaultInstance;
+  return instances[0].name;
+}
+
+// Prompt on stderr and read one line. With `hidden`, typed characters are not echoed.
+function prompt(question, { hidden = false } = {}) {
+  const readline = require('readline');
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: process.stdin.isTTY });
+    if (hidden && process.stdin.isTTY) {
+      // Swallow echo of everything typed after the prompt text.
+      rl._writeToOutput = (s) => { if (s === question || s.startsWith(question)) process.stderr.write(question); };
+    }
+    rl.question(question, (answer) => {
+      if (hidden && process.stdin.isTTY) process.stderr.write('\n');
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+/**
+ * `dokploy login [--url URL] [--name NAME] [--default]`
+ * The API key is read from DOKPLOY_API_KEY, piped stdin, or a hidden prompt,
+ * never from a flag, so it does not land in shell history or process lists.
+ */
+async function cmdLogin(flags) {
+  const known = new Set(['url', 'name', 'default', 'help']);
+  const unknown = Object.keys(flags).filter((k) => !known.has(k));
+  if (unknown.length) fail(`Unknown flag(s) for login: ${unknown.map((k) => `--${k}`).join(', ')}`);
+  if (flags.help) {
+    process.stdout.write(
+      'Usage: dokploy login [--url URL] [--name NAME] [--default]\n\n' +
+      'Saves a Dokploy instance to ' + config.configPath() + ' (mode 600).\n' +
+      '  --url      Dokploy panel URL, e.g. http://203.0.113.7:3000 or https://dokploy.example.com\n' +
+      '  --name     Instance name (default: "default")\n' +
+      '  --default  Make this the default instance\n\n' +
+      'The API key comes from the DOKPLOY_API_KEY env var, piped stdin, or a hidden prompt.\n' +
+      'Create it in Dokploy: Settings > Profile > API/CLI.\n'
+    );
+    return;
+  }
+
+  const name = requireValue(flags, 'name') || 'default';
+  let rawUrl = requireValue(flags, 'url') || '';
+  let apiKey = process.env.DOKPLOY_API_KEY || '';
+
+  if (!process.stdin.isTTY && !apiKey) {
+    // Piped: first line is the key (url must then come from --url).
+    const chunks = [];
+    for await (const c of process.stdin) chunks.push(c);
+    apiKey = Buffer.concat(chunks).toString('utf8').split(/\r?\n/)[0].trim();
+  }
+  if (!rawUrl) {
+    if (!process.stdin.isTTY) {
+      fail('--url is required when stdin is not a terminal. Run `dokploy login` in a terminal window, or export DOKPLOY_API_KEY in your shell and run: dokploy login --url URL');
+    }
+    rawUrl = await prompt('Dokploy panel URL (e.g. http://203.0.113.7:3000): ');
+  }
+  let baseUrl;
+  try { baseUrl = config.normalizeBaseUrl(rawUrl); } catch (e) { fail(e.message); }
+  if (!apiKey) {
+    if (!process.stdin.isTTY) fail('No API key: run `dokploy login` in a terminal window, or export DOKPLOY_API_KEY in your shell and run: dokploy login --url URL');
+    apiKey = await prompt('API key (input hidden): ', { hidden: true });
+  }
+  if (!apiKey) fail('API key is empty');
+
+  // Verify before saving, with a cheap read that any valid key can make.
+  const client = new DokployClient(baseUrl, apiKey);
+  try {
+    await client.request('/project.all', 'GET', {}, null);
+  } catch (e) {
+    const hint = /\(401\)|\(403\)/.test(e.message)
+      ? 'The API key was rejected. Create a new one in Dokploy: Settings > Profile > API/CLI.'
+      : /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(e.message)
+        ? `Could not reach ${baseUrl}. Check the URL and that port 3000 (or your domain) is open.`
+        : e.message;
+    fail(`Login check failed: ${hint}`);
+  }
+
+  let saved;
+  try { saved = config.saveInstance({ name, baseUrl, apiKey }, { makeDefault: flags.default === true }); }
+  catch (e) { fail(e.message); }
+  process.stderr.write(`Logged in to ${baseUrl} as instance '${name}'. Saved to ${saved.file}.\n`);
+  if (process.env.DOKPLOY_BASE_URL || process.env.DOKPLOY_INSTANCES) {
+    process.stderr.write('Note: DOKPLOY_BASE_URL / DOKPLOY_INSTANCES are set and take precedence over the saved login.\n');
+  }
+}
+
+// Returns the flag's string value, undefined when absent, and fails when the
+// flag was given without a value (parseArgs turns a bare `--name` into true).
+function requireValue(flags, key) {
+  if (flags[key] === undefined) return undefined;
+  if (typeof flags[key] !== 'string' || flags[key] === '') fail(`--${key} requires a value`);
+  return flags[key];
+}
+
+/** `dokploy logout [--name NAME]` removes one saved instance, or all of them. */
+function cmdLogout(flags) {
+  const unknown = Object.keys(flags).filter((k) => !['name', 'help'].includes(k));
+  if (unknown.length) fail(`Unknown flag(s) for logout: ${unknown.map((k) => `--${k}`).join(', ')}`);
+  if (flags.help) {
+    process.stdout.write(
+      'Usage: dokploy logout [--name NAME]\n\n' +
+      'Removes one saved instance, or every saved login when --name is omitted.\n' +
+      'Saved logins live in ' + config.configPath() + '.\n'
+    );
+    return;
+  }
+  // An explicit but empty --name must not fall through to "remove everything".
+  const name = requireValue(flags, 'name');
+  let res;
+  try { res = config.removeInstance(name); } catch (e) { fail(e.message); }
+  if (res.removed.length === 0) {
+    process.stderr.write(name ? `No saved instance named '${name}'.\n` : 'Nothing saved; already logged out.\n');
+    return;
+  }
+  process.stderr.write(`Removed saved login: ${res.removed.join(', ')}.\n`);
 }
 
 function pickClient(instances, defaultInstance, requestedName) {
@@ -354,7 +461,9 @@ function printTopHelp(index, instances, defaultInstance) {
     : '  dokploy <domain> <action> [--key value ...]';
 
   let authSection;
-  if (multi) {
+  if (instances.length === 0) {
+    authSection = `Not logged in. Run \`dokploy login\` to save a Dokploy URL and API key.`;
+  } else if (multi) {
     const lines = instances.map((i) => {
       const tag = i.name === defaultInstance ? ' (default)' : '';
       return `    ${i.name}${tag} → ${i.baseUrl}`;
@@ -367,7 +476,7 @@ Pass --instance NAME to target one. Omit it to use '${defaultInstance}'.
 Run \`dokploy instances\` for machine-readable JSON.`;
   } else {
     authSection =
-`Single-instance mode. Set DOKPLOY_INSTANCES (JSON array) to use multiple Dokploy installs.
+`Single-instance mode. Run \`dokploy login --name NAME\` again to add another Dokploy install.
 Configured: ${instances[0].name} → ${instances[0].baseUrl}`;
   }
 
@@ -380,8 +489,10 @@ ${usageLine}
   dokploy <domain>                     List actions in a domain
   dokploy <domain> <action> --help     Show params for an action
   dokploy instances                    List configured instances (JSON)
+  dokploy login [--url URL] [--name N] Save a Dokploy URL + API key (see login --help)
+  dokploy logout [--name N]            Remove a saved login
 
-Auth:
+Auth (${config.configPath()}; env vars win when set):
 ${authSection}
 
 Value coercion:
@@ -655,15 +766,24 @@ function fail(msg, code = 1) {
 }
 
 async function main() {
-  const endpoints = loadEndpoints();
-  const index = buildIndex(endpoints);
   const parsed = parseArgs(process.argv);
   if (parsed.error) fail(parsed.error);
   const { globalFlags, positional, flags } = parsed;
 
+  // login/logout work before any instance is configured.
+  if (positional[0] === 'login' || positional[0] === 'logout') {
+    if (positional.length > 1) fail(`Unexpected arguments after '${positional[0]}': ${positional.slice(1).join(' ')}`);
+    if (globalFlags.instance) fail(`Use --name, not --instance, with '${positional[0]}'`);
+    return positional[0] === 'login' ? cmdLogin(flags) : cmdLogout(flags);
+  }
+
+  const endpoints = loadEndpoints();
+  const index = buildIndex(endpoints);
+
   // Resolve instances early so help text and validation can reference them.
-  const instances = parseInstances();
-  const defaultInstance = resolveDefault(instances);
+  // Nothing configured is allowed here; commands that call the API check below.
+  const instances = parseInstances({ optional: true });
+  const defaultInstance = instances.length ? resolveDefault(instances) : undefined;
   if (globalFlags.instance && !instances.some((i) => i.name === globalFlags.instance)) {
     fail(`Unknown instance '${globalFlags.instance}'. Configured: ${instances.map((i) => i.name).join(', ')}`);
   }
@@ -686,6 +806,7 @@ async function main() {
 
   // `dokploy instances` → JSON listing of configured instances.
   if (positional[0] === 'instances') {
+    if (instances.length === 0) fail(NOT_LOGGED_IN);
     if (positional.length > 1) {
       fail(`Unexpected arguments after 'instances': ${positional.slice(1).join(' ')}`);
     }
@@ -746,6 +867,7 @@ async function main() {
     fail(`Missing required parameter(s): ${missing.map((m) => `--${m}`).join(', ')}\n       See: dokploy ${domain} ${action} --help`);
   }
 
+  if (instances.length === 0) fail(NOT_LOGGED_IN);
   const client = pickClient(instances, defaultInstance, globalFlags.instance);
   try {
     const apiPath = `/${ep.operationId.replace(/-/g, '.')}`;

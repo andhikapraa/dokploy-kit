@@ -54,9 +54,12 @@ dokploy [--instance NAME] <domain> <action> [--key value ...]
 dokploy --help
 ```
 
-The Auth section will say either:
+The Auth section will say one of:
+- *"Not logged in."* — ask the user to run `dokploy login` in a separate terminal window. It prompts for the panel URL and the API key (input hidden), checks them, and saves them. It needs a real terminal: Claude Code's `!` prefix and agent Bash tools have no TTY, so the prompt cannot run there. If the agent must run the login, the user first exports `DOKPLOY_API_KEY` in their own shell and starts the agent from that shell; the agent then runs `dokploy login --url <panel-url>`, which reads the key from the environment. Either way, login stores the key in its mode-600 config file; that is the one place it should live. Never ask for the API key in chat, never pass it as a command argument, and never put it in any other file.
 - *"Single-instance mode. Configured: default → https://..."* — don't pass `--instance`.
 - *"Configured instances (N): main (default) → ..., staging → ..."* — pass `--instance NAME` on every call that isn't the default.
+
+The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `$DOKPLOY_CONFIG` if set, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json` (`dokploy login --help` prints the path in use). For API calls, credentials resolve in this order: `DOKPLOY_INSTANCES`, then `DOKPLOY_BASE_URL` with `DOKPLOY_API_KEY`, then the saved login. A set `DOKPLOY_BASE_URL` wins even without `DOKPLOY_API_KEY`, so it never falls back to the saved login's key. `DOKPLOY_API_KEY` alone does not select an instance for API calls; it is only an input to `dokploy login --url`. `dokploy logout [--name NAME]` removes a saved login.
 
 For a machine-readable list of instances (e.g. when scripting or when the user names an instance you want to validate):
 

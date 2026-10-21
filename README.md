@@ -32,7 +32,13 @@ npx -y dokploy-kit --help
 git clone https://github.com/andhikapraa/dokploy-kit && cd dokploy-kit && npm install && npm link
 ```
 
-Set auth env (`DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY` for single-instance, or `DOKPLOY_INSTANCES` JSON for multi). See [Path A](#path-a--cli--agent-skill-recommended-for-claude-code) below for the full setup.
+Then log in once:
+
+```bash
+dokploy login          # or: npx -y dokploy-kit login
+```
+
+It asks for the panel URL and API key (input hidden), checks them against your Dokploy, and saves them to `~/.config/dokploy/config.json` (mode 600). Agents launched from desktop apps read the same file, so there are no shell env vars to wire up. See [Configure auth](#configure-auth) for env vars and multiple instances.
 
 Alternative — **Claude Code plugin marketplace** for users who prefer `/plugin` UX:
 
@@ -80,7 +86,7 @@ npm install
 
 ### 2. Get a Dokploy API key
 
-Dokploy → **Settings → API Keys → Create**. The key is sent as an `x-api-key` header (Bearer auth is not accepted by Dokploy).
+Dokploy → **Settings → Profile → API/CLI → Generate**. The key is sent as an `x-api-key` header (Bearer auth is not accepted by Dokploy).
 
 ### 3. Pick a surface — CLI + Skill (recommended) or MCP server
 
@@ -108,16 +114,39 @@ npm link
 npm run cli -- --list
 ```
 
-**Configure auth** — same env vars the MCP server uses. Either export them in your shell, set them in your skill's runner config, or put them in a `.envrc`/`direnv` file. For a single instance:
+<a id="configure-auth"></a>**Configure auth.** The CLI and the MCP server resolve credentials the same way, first match wins:
+
+1. `DOKPLOY_INSTANCES` env var (JSON array)
+2. `DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY` env vars
+3. The saved login from `dokploy login`: `$DOKPLOY_CONFIG` if set, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json`. `dokploy login --help` prints the path in use.
+
+Saved login, single instance:
+
+```bash
+dokploy login                                   # prompts for URL and key
+dokploy login --url https://your-dokploy-host   # prompts only for the key
+printf '%s\n' "$KEY" | dokploy login --url https://your-dokploy-host   # non-interactive
+```
+
+The key is never accepted as a flag, so it stays out of shell history and process lists. The URL may be the panel address (`http://203.0.113.7:3000`); `/api` is added for you.
+
+The prompt needs a real terminal. Claude Code's `!` prefix and agent Bash tools run without one, so run `dokploy login` in a separate terminal window. To let an agent run it instead, export `DOKPLOY_API_KEY` in your own shell, start the agent from that shell, and have it run `dokploy login --url https://your-dokploy-host`. The key is read from the environment, so it never appears in a command line or an extra file; login then stores it in the mode-600 config file like any other login.
+
+Saved login, multiple instances (pick per-call with `--instance NAME`):
+
+```bash
+dokploy login --name main    --url https://dokploy-a
+dokploy login --name staging --url https://dokploy-b
+dokploy login --name main    --url https://dokploy-a --default   # switch the default
+dokploy logout --name staging                                    # or `dokploy logout` for all
+```
+
+Env vars still work and override the saved login, which suits CI and `direnv`:
 
 ```bash
 export DOKPLOY_BASE_URL="https://your-dokploy-host/api"
 export DOKPLOY_API_KEY="your-key"
-```
-
-Multi-instance (one CLI, many Dokploys — pick per-call with `--instance NAME`):
-
-```bash
+# or many at once:
 export DOKPLOY_INSTANCES='[{"name":"main","baseUrl":"https://dokploy-a/api","apiKey":"key-a"},{"name":"staging","baseUrl":"https://dokploy-b/api","apiKey":"key-b"}]'
 export DOKPLOY_DEFAULT_INSTANCE="main"
 ```
