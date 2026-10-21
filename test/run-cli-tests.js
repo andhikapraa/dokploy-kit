@@ -22,6 +22,14 @@ const endpoints = require('../endpoints-parsed.json');
 
 const CLI_PATH = path.join(__dirname, '..', 'src', 'cli.js');
 
+// Point every spawned CLI at an empty config dir, so a developer's own
+// `dokploy login` never leaks into tests that expect "not configured".
+const fs = require('fs');
+const os = require('os');
+const TEST_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dokploy-kit-test-'));
+const TEST_CONFIG = path.join(TEST_CONFIG_DIR, 'config.json');
+process.on('exit', () => fs.rmSync(TEST_CONFIG_DIR, { recursive: true, force: true }));
+
 let passed = 0;
 let failed = 0;
 
@@ -46,6 +54,7 @@ function spawnCli(args, envOverrides = {}) {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     NODE_PATH: process.env.NODE_PATH || '',
+    DOKPLOY_CONFIG: TEST_CONFIG,
   };
   // 30s timeout so a regression that hangs the CLI doesn't stall CI indefinitely.
   return spawnSync('node', [CLI_PATH, ...args], {
@@ -596,10 +605,16 @@ r = spawnCli(['domain', 'create', '--help'], { DOKPLOY_BASE_URL: 'https://x', DO
 assert(r.status === 0, 'domain create --help still works');
 // (smoke for the nullable handling — unit tests above prove the coercion path)
 
-section('Integration: missing auth env');
-r = spawnCli(['--list']);  // no env
-assert(r.status === 1, 'missing DOKPLOY_BASE_URL exits 1');
-assert(r.stderr.includes('DOKPLOY_BASE_URL'), 'error mentions the missing var');
+section('Integration: missing auth (no env, no saved login)');
+r = spawnCli(['--list']);  // discovery needs no credentials
+assert(r.status === 0 && r.stdout.includes('project'), '--list works before login');
+r = spawnCli([]);
+assert(r.status === 0 && /Not logged in/.test(r.stdout), 'top help works before login and says how to log in');
+r = spawnCli(['project', 'all']);
+assert(r.status === 1, 'an API call without auth exits 1');
+assert(r.stderr.includes('dokploy login') && r.stderr.includes('DOKPLOY_BASE_URL'), 'error names both login and the env var');
+r = spawnCli(['instances']);
+assert(r.status === 1 && /Not logged in/.test(r.stderr), 'instances without auth exits 1');
 
 section('Integration: env validation failure modes');
 r = spawnCli(['--list'], { DOKPLOY_INSTANCES: 'not json' });
@@ -622,6 +637,101 @@ r = spawnCli(['--list'], {
 assert(r.status === 1, 'unknown DOKPLOY_DEFAULT_INSTANCE exits 1');
 assert(/DOKPLOY_DEFAULT_INSTANCE/.test(r.stderr) && /nonexistent/.test(r.stderr),
   'error names the env var and bad value');
+
+// --- Saved login (config file) ----------------------------------------------
+
+const config = require('../src/config.js');
+
+section('normalizeBaseUrl');
+assert(config.normalizeBaseUrl('http://1.2.3.4:3000') === 'http://1.2.3.4:3000/api', 'bare panel URL gains /api');
+assert(config.normalizeBaseUrl('https://d.example.com/') === 'https://d.example.com/api', 'trailing slash handled');
+assert(config.normalizeBaseUrl('https://d.example.com/api/') === 'https://d.example.com/api', 'existing /api kept once');
+let threw = false;
+try { config.normalizeBaseUrl('ftp://x'); } catch { threw = true; }
+assert(threw, 'non-http URL rejected');
+
+section('Config file: resolution order and saved default');
+{
+  const saved = { defaultInstance: 'b', instances: [
+    { name: 'a', baseUrl: 'https://a/api', apiKey: 'ka' },
+    { name: 'b', baseUrl: 'https://b/api', apiKey: 'kb' },
+  ] };
+  fs.writeFileSync(TEST_CONFIG, JSON.stringify(saved));
+  let rr = spawnCli(['instances']);
+  const fromFile = parseJsonOrFail(rr.stdout, 'instances from file') || [];
+  assert(rr.status === 0, 'saved config works with no env vars');
+  assert(fromFile.length === 2 && fromFile.find((i) => i.isDefault)?.name === 'b', 'saved defaultInstance is honored');
+
+  rr = spawnCli(['instances'], { DOKPLOY_BASE_URL: 'https://env/api', DOKPLOY_API_KEY: 'k' });
+  const fromEnv = parseJsonOrFail(rr.stdout, 'instances from env') || [];
+  assert(fromEnv.length === 1 && fromEnv[0].baseUrl === 'https://env/api', 'env vars take precedence over the config file');
+
+  fs.writeFileSync(TEST_CONFIG, '{not json');
+  rr = spawnCli(['--list']);
+  assert(rr.status === 1 && /Invalid config file/.test(rr.stderr), 'corrupt config file fails loudly');
+  fs.rmSync(TEST_CONFIG, { force: true });
+}
+
+section('Integration: login / logout against a local fake Dokploy');
+{
+  // The CLI is spawned synchronously, so the fake API runs in its own process.
+  // It serves project.all: 200 for the right key, 401 otherwise.
+  const fakePort = 40000 + Math.floor(Math.random() * 20000);
+  const fakeSrc = `
+    require('http').createServer((req, res) => {
+      if (!req.url.startsWith('/api/project.all')) { res.writeHead(404).end(); return; }
+      const ok = req.headers['x-api-key'] === 'good-key';
+      res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
+      res.end(ok ? '[]' : JSON.stringify({ message: 'Unauthorized' }));
+    }).listen(${fakePort}, '127.0.0.1');
+  `;
+  const fake = require('child_process').spawn('node', ['-e', fakeSrc], { stdio: 'ignore' });
+  const panel = `http://127.0.0.1:${fakePort}`;
+  // Wait until the fake server accepts connections (up to 10 s).
+  spawnSync('node', ['-e', `
+    const end = Date.now() + 10000;
+    (async function poll() {
+      try { await fetch('${panel}/api/project.all'); process.exit(0); }
+      catch { if (Date.now() > end) process.exit(1); setTimeout(poll, 100); }
+    })();
+  `], { timeout: 15_000 });
+
+  let rr = spawnCli(['login', '--url', panel], { DOKPLOY_API_KEY: 'bad-key' });
+  assert(rr.status === 1 && /rejected/i.test(rr.stderr), 'bad key is rejected before saving');
+  assert(!fs.existsSync(TEST_CONFIG), 'nothing saved after a failed login');
+
+  rr = spawnSync('node', [CLI_PATH, 'login', '--url', panel], {
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, DOKPLOY_CONFIG: TEST_CONFIG },
+    input: 'good-key\n', encoding: 'utf-8', timeout: 30_000,
+  });
+  assert(rr.status === 0, 'login with a piped key succeeds');
+  assert(!rr.stdout.includes('good-key') && !rr.stderr.includes('good-key'), 'API key is never echoed');
+  const savedCfg = JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8'));
+  assert(savedCfg.instances[0].baseUrl === `${panel}/api` && savedCfg.defaultInstance === 'default', 'saved URL is normalized to /api and becomes default');
+  if (process.platform !== 'win32') {
+    assert((fs.statSync(TEST_CONFIG).mode & 0o777) === 0o600, 'config file is mode 600');
+  }
+
+  rr = spawnCli(['project', 'all']);
+  assert(rr.status === 0 && rr.stdout.trim() === '[]', 'API calls use the saved login with no env vars');
+
+  rr = spawnCli(['login', '--url', panel, '--name', 'second'], { DOKPLOY_API_KEY: 'good-key' });
+  const two = JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8'));
+  assert(rr.status === 0 && two.instances.length === 2 && two.defaultInstance === 'default', 'second login adds an instance and keeps the default');
+
+  rr = spawnCli(['logout', '--name', 'second']);
+  assert(rr.status === 0 && JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8')).instances.length === 1, 'logout --name removes one instance');
+  rr = spawnCli(['logout']);
+  assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout removes the config file');
+
+  rr = spawnCli(['login', '--url', 'http://127.0.0.1:1'], { DOKPLOY_API_KEY: 'good-key' });
+  assert(rr.status === 1 && /Could not reach/.test(rr.stderr), 'unreachable URL gives a reachability hint');
+
+  rr = spawnCli(['login', '--url', panel, '--apiKey', 'x']);
+  assert(rr.status === 1 && /Unknown flag/.test(rr.stderr), 'API key is not accepted as a flag');
+
+  fake.kill();
+}
 
 // --- Summary -----------------------------------------------------------------
 

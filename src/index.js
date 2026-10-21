@@ -10,55 +10,28 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { DokployClient } = require('./api-client.js');
 const { generateTools } = require('./tool-generator.js');
+const config = require('./config.js');
 const path = require('path');
 const fs = require('fs');
 
+// Same resolution as the CLI: env vars first, then the file `dokploy login` writes.
 function parseInstances() {
-  const raw = process.env.DOKPLOY_INSTANCES;
-  if (raw) {
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      console.error(`Invalid DOKPLOY_INSTANCES JSON: ${e.message}`);
-      process.exit(1);
-    }
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      console.error('DOKPLOY_INSTANCES must be a non-empty JSON array');
-      process.exit(1);
-    }
-    const seen = new Set();
-    for (const inst of parsed) {
-      if (!inst || typeof inst !== 'object') {
-        console.error('Each DOKPLOY_INSTANCES entry must be an object');
-        process.exit(1);
-      }
-      const missing = ['name', 'baseUrl', 'apiKey'].filter((k) => !inst[k]);
-      if (missing.length > 0) {
-        const label = inst.name ? `'${inst.name}'` : 'unnamed entry';
-        console.error(`DOKPLOY_INSTANCES ${label} is missing: ${missing.join(', ')}`);
-        process.exit(1);
-      }
-      if (seen.has(inst.name)) {
-        console.error(`Duplicate instance name: ${inst.name}`);
-        process.exit(1);
-      }
-      seen.add(inst.name);
-    }
-    return parsed;
-  }
-
-  // Single-instance fallback
-  const apiKey = process.env.DOKPLOY_API_KEY || '';
-  const baseUrl = process.env.DOKPLOY_BASE_URL || '';
-  if (!baseUrl) {
-    console.error('Configure DOKPLOY_BASE_URL (e.g. https://dokploy.example.com/api) or DOKPLOY_INSTANCES.');
+  let resolved;
+  try {
+    resolved = config.loadInstances();
+  } catch (e) {
+    console.error(e.message);
     process.exit(1);
   }
-  if (!apiKey) {
+  if (!resolved) {
+    console.error('Not configured. Run `dokploy login`, or set DOKPLOY_BASE_URL (e.g. https://dokploy.example.com/api) and DOKPLOY_API_KEY.');
+    process.exit(1);
+  }
+  const single = resolved.instances.length === 1 ? resolved.instances[0] : null;
+  if (single && !single.apiKey) {
     console.error('Warning: DOKPLOY_API_KEY is not set. All API calls will fail with 401.');
   }
-  return [{ name: 'default', baseUrl, apiKey }];
+  return { instances: resolved.instances, savedDefault: resolved.defaultInstance };
 }
 
 async function main() {
@@ -72,14 +45,15 @@ async function main() {
   const parsedEndpoints = JSON.parse(fs.readFileSync(endpointsPath, 'utf-8'));
 
   // Build per-instance client registry
-  const instances = parseInstances();
+  const { instances, savedDefault } = parseInstances();
   const instanceNames = instances.map((i) => i.name);
   const requestedDefault = process.env.DOKPLOY_DEFAULT_INSTANCE;
   if (requestedDefault && !instanceNames.includes(requestedDefault)) {
-    console.error(`DOKPLOY_DEFAULT_INSTANCE='${requestedDefault}' not found in DOKPLOY_INSTANCES`);
+    console.error(`DOKPLOY_DEFAULT_INSTANCE='${requestedDefault}' not found in configured instances`);
     process.exit(1);
   }
-  const defaultInstance = requestedDefault || instanceNames[0];
+  const defaultInstance =
+    requestedDefault || (savedDefault && instanceNames.includes(savedDefault) ? savedDefault : instanceNames[0]);
   const clients = new Map(
     instances.map((i) => [i.name, new DokployClient(i.baseUrl, i.apiKey)])
   );

@@ -218,7 +218,33 @@ async function testRequests() {
   }
 }
 
+// Start the real MCP entry point. It must boot from a saved `dokploy login`
+// file alone, and fail with a login hint when nothing is configured.
+function testServerStartup() {
+  console.log('\n=== MCP server startup ===');
+  const { spawnSync } = require('child_process');
+  const fsx = require('fs');
+  const os = require('os');
+  const dir = fsx.mkdtempSync(require('path').join(os.tmpdir(), 'dokploy-mcp-test-'));
+  const entry = require('path').join(__dirname, '..', 'src', 'index.js');
+  const run = (env) => spawnSync('node', [entry], {
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+    input: '', encoding: 'utf-8', timeout: 15_000,
+  });
+  try {
+    const cfg = require('path').join(dir, 'config.json');
+    fsx.writeFileSync(cfg, JSON.stringify({ defaultInstance: 'default', instances: [{ name: 'default', baseUrl: 'http://127.0.0.1:1/api', apiKey: 'k' }] }));
+    let r = run({ DOKPLOY_CONFIG: cfg });
+    assert(r.status === 0 && !/Error/.test(r.stderr), `server boots from a saved login (exit ${r.status}${r.stderr ? ': ' + r.stderr.split('\n')[0] : ''})`);
+    r = run({ DOKPLOY_CONFIG: require('path').join(dir, 'missing.json') });
+    assert(r.status === 1 && /dokploy login/.test(r.stderr), 'server with no config exits 1 and suggests `dokploy login`');
+  } finally {
+    fsx.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 testRequests()
+  .then(testServerStartup)
   .catch((e) => assert(false, `request tests crashed: ${e.message}`))
   .finally(() => {
     // Summary

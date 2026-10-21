@@ -54,9 +54,12 @@ dokploy [--instance NAME] <domain> <action> [--key value ...]
 dokploy --help
 ```
 
-The Auth section will say either:
+The Auth section will say one of:
+- *"Not logged in."* — ask the user to run `dokploy login` in their own terminal (in Claude Code: `! dokploy login`). It prompts for the panel URL and the API key (input hidden), checks them, and saves them. Never ask for the API key in chat and never pass it as a command argument.
 - *"Single-instance mode. Configured: default → https://..."* — don't pass `--instance`.
 - *"Configured instances (N): main (default) → ..., staging → ..."* — pass `--instance NAME` on every call that isn't the default.
+
+The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `~/.config/dokploy/config.json`; `DOKPLOY_BASE_URL`/`DOKPLOY_API_KEY` or `DOKPLOY_INSTANCES` env vars override it when set. `dokploy logout [--name NAME]` removes a saved login.
 
 For a machine-readable list of instances (e.g. when scripting or when the user names an instance you want to validate):
 

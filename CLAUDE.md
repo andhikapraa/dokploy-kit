@@ -7,6 +7,7 @@ Currently tracks Dokploy **v0.29.5** (526 endpoints across 48 tools).
 
 - `src/index.js` - MCP server entry point (stdio transport)
 - `src/api-client.js` - HTTP client (auth via `x-api-key` header)
+- `src/config.js` - Credential resolution (env vars, then the `dokploy login` config file), shared by the CLI and MCP server
 - `src/tool-generator.js` - Generates MCP tools from parsed OpenAPI spec
 - `endpoints-parsed.json` - Pre-parsed endpoint metadata, regenerated from `dokployapi.json` via `npm run parse`
 - `scripts/parse-spec.js` - Parser that turns the raw OpenAPI spec into the flat endpoint catalog
@@ -15,7 +16,7 @@ Currently tracks Dokploy **v0.29.5** (526 endpoints across 48 tools).
 ## Auth
 
 All endpoints use `x-api-key: <API_KEY>` header. Bearer auth is **rejected** by Dokploy.
-API key set via `DOKPLOY_API_KEY` env var (single-instance) or inside `DOKPLOY_INSTANCES` JSON (multi-instance).
+Credentials resolve in this order: `DOKPLOY_INSTANCES` (JSON), then `DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY`, then the file `dokploy login` writes (`~/.config/dokploy/config.json`, override with `DOKPLOY_CONFIG`). The key is never accepted as a CLI flag. CLI tests point `DOKPLOY_CONFIG` at a temp file so a developer's own login cannot leak in.
 
 ## Tool naming
 
