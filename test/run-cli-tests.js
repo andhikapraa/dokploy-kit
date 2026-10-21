@@ -763,12 +763,26 @@ section('Integration: login / logout against a local fake Dokploy');
 
   rr = spawnCli(['logout', '--name', 'second']);
   assert(rr.status === 0 && readCfg().instances.length === 1, 'logout --name removes one instance');
-  // A temp file stranded by a hard kill mid-write must not survive logout.
-  const stranded = `${TEST_CONFIG}.999.1.tmp`;
+  // A temp file stranded by a hard kill mid-write must not survive logout, but
+  // a live writer's in-flight temp must be left alone. A finished child gives a
+  // PID that is known to be dead; the test runner's own parent is known alive.
+  const deadPid = spawnSync('node', ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf-8' }).stdout.trim();
+  const stranded = `${TEST_CONFIG}.${deadPid}.1.tmp`;
+  const inFlight = `${TEST_CONFIG}.${process.ppid}.1.tmp`;
   fs.writeFileSync(stranded, '{"instances":[{"apiKey":"good-key"}]}');
+  fs.writeFileSync(inFlight, '{}');
   rr = spawnCli(['logout']);
   assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout removes the config file');
   assert(!fs.existsSync(stranded), 'logout also removes a stranded temp file');
+  assert(fs.existsSync(inFlight), 'logout keeps a temp file whose writer is still running');
+  fs.rmSync(inFlight, { force: true });
+
+  // Removing the last instance by name must sweep stranded temps too.
+  rr = spawnCli(['login', '--url', panel], { DOKPLOY_API_KEY: 'good-key' });
+  fs.writeFileSync(stranded, '{"instances":[{"apiKey":"good-key"}]}');
+  rr = spawnCli(['logout', '--name', 'default']);
+  assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout --name of the last instance removes the config');
+  assert(!fs.existsSync(stranded), 'logout --name also removes a stranded temp file');
 
   rr = spawnCli(['login', '--url', 'http://127.0.0.1:1'], { DOKPLOY_API_KEY: 'good-key' });
   assert(rr.status === 1 && /Could not reach/.test(rr.stderr), 'unreachable URL gives a reachability hint');

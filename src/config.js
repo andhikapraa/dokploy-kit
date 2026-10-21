@@ -122,16 +122,25 @@ function writeConfigFile(file, data) {
   }
 }
 
-// A hard kill between write and rename can leave a temp file holding the key.
-// Sweep `<config>.*.tmp` siblings on every write and on logout.
+// A hard kill between write and rename can leave `<config>.<pid>.<ms>.tmp`
+// holding the key. Remove only temps whose writer process is gone, so a
+// concurrent login's in-flight temp file is never deleted under it.
 function removeStaleTemps(file) {
   const dir = path.dirname(file);
   const prefix = `${path.basename(file)}.`;
   let entries = [];
   try { entries = fs.readdirSync(dir); } catch { return; }
   for (const f of entries) {
-    if (f.startsWith(prefix) && f.endsWith('.tmp')) fs.rmSync(path.join(dir, f), { force: true });
+    if (!f.startsWith(prefix) || !f.endsWith('.tmp')) continue;
+    const pid = Number(f.slice(prefix.length).split('.')[0]);
+    if (pid !== process.pid && isProcessAlive(pid)) continue;
+    fs.rmSync(path.join(dir, f), { force: true });
   }
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
 /**
@@ -140,8 +149,9 @@ function removeStaleTemps(file) {
  */
 function removeInstance(name) {
   const file = configPath();
+  // Every logout path, including removing the last named instance, sweeps temps.
+  removeStaleTemps(file);
   if (!name) {
-    removeStaleTemps(file);
     if (!fs.existsSync(file)) return { file, removed: [] };
     let removed = ['(unreadable config)'];
     try { removed = readConfigFile(file).instances.map((i) => i.name); } catch { /* still delete */ }

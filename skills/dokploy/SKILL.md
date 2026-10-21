@@ -59,7 +59,7 @@ The Auth section will say one of:
 - *"Single-instance mode. Configured: default → https://..."* — don't pass `--instance`.
 - *"Configured instances (N): main (default) → ..., staging → ..."* — pass `--instance NAME` on every call that isn't the default.
 
-The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `$DOKPLOY_CONFIG` if set, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json` (`dokploy login --help` prints the path in use); `DOKPLOY_BASE_URL`/`DOKPLOY_API_KEY` or `DOKPLOY_INSTANCES` env vars override it when set. `dokploy logout [--name NAME]` removes a saved login.
+The API key is created in Dokploy under **Settings → Profile → API/CLI**. A saved login lives in `$DOKPLOY_CONFIG` if set, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json` (`dokploy login --help` prints the path in use). For API calls, credentials resolve in this order: `DOKPLOY_INSTANCES`, then `DOKPLOY_BASE_URL` with `DOKPLOY_API_KEY`, then the saved login. `DOKPLOY_API_KEY` alone does not select an instance for API calls; it is only an input to `dokploy login --url`. `dokploy logout [--name NAME]` removes a saved login.
 
 For a machine-readable list of instances (e.g. when scripting or when the user names an instance you want to validate):
 
