@@ -797,7 +797,7 @@ section('Integration: login / logout against a local fake Dokploy');
   const { spawn: spawnAsync } = require('child_process');
   const configModule = path.join(__dirname, '..', 'src', 'config.js');
   const startAt = Date.now() + 1500;
-  const writers = 8, perWriter = 15;
+  const writers = 16, perWriter = 20;
   const saverSrc = (w) => `
     const c = require(${JSON.stringify(configModule)});
     while (Date.now() < ${startAt}) {}
@@ -813,7 +813,16 @@ section('Integration: login / logout against a local fake Dokploy');
   while (exited < writers && Date.now() < waitUntil) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
   const concurrent = readCfg();
   assert(concurrent.instances.length === writers * perWriter, `concurrent saves keep every instance (${concurrent.instances.length}/${writers * perWriter})`);
-  assert(!fs.existsSync(`${TEST_CONFIG}.lock`), 'lock file is released after concurrent saves');
+  assert(!fs.existsSync(`${TEST_CONFIG}.lock`), 'lock is released after concurrent saves');
+  spawnCli(['logout']);
+
+  // A lock left by a killed process is taken over once it is old enough.
+  fs.mkdirSync(`${TEST_CONFIG}.lock`);
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(`${TEST_CONFIG}.lock`, old, old);
+  rr = spawnCli(['login', '--url', panel], { DOKPLOY_API_KEY: 'good-key' });
+  assert(rr.status === 0 && readCfg().instances.length === 1, 'login takes over a stale lock');
+  assert(!fs.existsSync(`${TEST_CONFIG}.lock`), 'stale lock is gone after takeover');
   spawnCli(['logout']);
 
   // A redirect from the panel must not carry the API key to another origin.

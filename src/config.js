@@ -163,24 +163,41 @@ function removeInstance(name) {
 // Serialize read-modify-write across processes with an exclusive lock file, so
 // two concurrent logins cannot both start from the same snapshot and drop one
 // instance. A lock left by a dead process is taken over.
+//
+// The lock is a directory, because mkdir is atomic. Staleness is decided by
+// age, not by the owner's PID: a dead PID does not prove the lock is abandoned
+// (the owner may have released it and exited, and a new owner taken it since).
+// A held lock lives for milliseconds, so one older than LOCK_STALE_MS was left
+// by a killed process.
+const LOCK_STALE_MS = 10_000;
+const LOCK_WAIT_MS = 15_000;
+
 function withConfigLock(file, fn) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const lock = `${file}.lock`;
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   for (;;) {
     try {
-      fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 });
+      fs.mkdirSync(lock, { mode: 0o700 });
       break;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      let owner = NaN;
-      try { owner = Number(fs.readFileSync(lock, 'utf8')); } catch { /* lock just released */ }
-      if (!isProcessAlive(owner)) { fs.rmSync(lock, { force: true }); continue; }
-      if (Date.now() > deadline) throw new Error(`Config is locked by process ${owner} (${lock}). Retry, or delete the lock file if that process is gone.`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      let ageMs = 0;
+      try { ageMs = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; /* just released */ }
+      if (ageMs > LOCK_STALE_MS) {
+        // Rename first so only one process wins the takeover of a stale lock.
+        const grave = `${lock}.stale.${process.pid}.${Date.now()}`;
+        try { fs.renameSync(lock, grave); fs.rmSync(grave, { recursive: true, force: true }); } catch { /* another process took it */ }
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`Config is locked (${lock}). Retry, or delete that directory if no dokploy command is running.`);
+      }
+      sleep(20);
     }
   }
-  try { return fn(); } finally { fs.rmSync(lock, { force: true }); }
+  try { return fn(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
 function removeInstanceLocked(file, name) {
