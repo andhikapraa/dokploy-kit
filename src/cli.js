@@ -137,8 +137,8 @@ async function cmdLogin(flags) {
     return;
   }
 
-  const name = typeof flags.name === 'string' && flags.name ? flags.name : 'default';
-  let rawUrl = typeof flags.url === 'string' ? flags.url : '';
+  const name = requireValue(flags, 'name') || 'default';
+  let rawUrl = requireValue(flags, 'url') || '';
   let apiKey = process.env.DOKPLOY_API_KEY || '';
 
   if (!process.stdin.isTTY && !apiKey) {
@@ -148,13 +148,15 @@ async function cmdLogin(flags) {
     apiKey = Buffer.concat(chunks).toString('utf8').split(/\r?\n/)[0].trim();
   }
   if (!rawUrl) {
-    if (!process.stdin.isTTY) fail('--url is required when stdin is not a terminal');
+    if (!process.stdin.isTTY) {
+      fail('--url is required when stdin is not a terminal. Run `dokploy login` in a terminal window, or pipe the key: dokploy login --url URL < key.txt');
+    }
     rawUrl = await prompt('Dokploy panel URL (e.g. http://203.0.113.7:3000): ');
   }
   let baseUrl;
   try { baseUrl = config.normalizeBaseUrl(rawUrl); } catch (e) { fail(e.message); }
   if (!apiKey) {
-    if (!process.stdin.isTTY) fail('No API key: pipe it on stdin or set DOKPLOY_API_KEY');
+    if (!process.stdin.isTTY) fail('No API key: run `dokploy login` in a terminal window, or pipe it: dokploy login --url URL < key.txt');
     apiKey = await prompt('API key (input hidden): ', { hidden: true });
   }
   if (!apiKey) fail('API key is empty');
@@ -181,11 +183,28 @@ async function cmdLogin(flags) {
   }
 }
 
+// Returns the flag's string value, undefined when absent, and fails when the
+// flag was given without a value (parseArgs turns a bare `--name` into true).
+function requireValue(flags, key) {
+  if (flags[key] === undefined) return undefined;
+  if (typeof flags[key] !== 'string' || flags[key] === '') fail(`--${key} requires a value`);
+  return flags[key];
+}
+
 /** `dokploy logout [--name NAME]` removes one saved instance, or all of them. */
 function cmdLogout(flags) {
   const unknown = Object.keys(flags).filter((k) => !['name', 'help'].includes(k));
   if (unknown.length) fail(`Unknown flag(s) for logout: ${unknown.map((k) => `--${k}`).join(', ')}`);
-  const name = typeof flags.name === 'string' ? flags.name : undefined;
+  if (flags.help) {
+    process.stdout.write(
+      'Usage: dokploy logout [--name NAME]\n\n' +
+      'Removes one saved instance, or every saved login when --name is omitted.\n' +
+      'Saved logins live in ' + config.configPath() + '.\n'
+    );
+    return;
+  }
+  // An explicit but empty --name must not fall through to "remove everything".
+  const name = requireValue(flags, 'name');
   let res;
   try { res = config.removeInstance(name); } catch (e) { fail(e.message); }
   if (res.removed.length === 0) {

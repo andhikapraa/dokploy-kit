@@ -14,6 +14,9 @@
  *
  * File: $DOKPLOY_CONFIG, else $XDG_CONFIG_HOME/dokploy/config.json,
  *       else ~/.config/dokploy/config.json (also on Windows: %USERPROFILE%\.config).
+ *
+ * Parse errors never include the raw JSON.parse message: V8 quotes part of the
+ * input, which here can be an API key.
  * Shape: { "defaultInstance": "default", "instances": [{ name, baseUrl, apiKey }] }
  */
 
@@ -53,8 +56,8 @@ function readConfigFile(file = configPath()) {
   let parsed;
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) {
-    throw new Error(`Invalid config file ${file}: ${e.message}`);
+  } catch {
+    throw new Error(`Invalid config file ${file}: not valid JSON. Fix it, or run \`dokploy logout\` and log in again.`);
   }
   validateInstances(parsed && parsed.instances, `config file ${file} "instances"`);
   return parsed;
@@ -69,7 +72,7 @@ function loadInstances() {
   const raw = process.env.DOKPLOY_INSTANCES;
   if (raw) {
     let parsed;
-    try { parsed = JSON.parse(raw); } catch (e) { throw new Error(`Invalid DOKPLOY_INSTANCES JSON: ${e.message}`); }
+    try { parsed = JSON.parse(raw); } catch { throw new Error('Invalid DOKPLOY_INSTANCES JSON: not a valid JSON array'); }
     return { instances: validateInstances(parsed, 'DOKPLOY_INSTANCES'), defaultInstance: undefined, source: 'env' };
   }
   const baseUrl = process.env.DOKPLOY_BASE_URL || '';
@@ -99,29 +102,40 @@ function saveInstance(inst, { makeDefault = false } = {}) {
   // Keep the existing default unless asked to switch or it no longer exists.
   const keepCurrent = !makeDefault && instances.some((i) => i.name === current.defaultInstance);
   const defaultInstance = keepCurrent ? current.defaultInstance : inst.name;
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(file, JSON.stringify({ defaultInstance, instances }, null, 2) + '\n', { mode: 0o600 });
-  // writeFileSync keeps the old mode when the file already exists.
-  try { fs.chmodSync(file, 0o600); } catch { /* best effort on Windows */ }
+  writeConfigFile(file, { defaultInstance, instances });
   return { file, defaultInstance, instances };
 }
 
-/** Remove one instance (or all when name is omitted). Returns what was removed. */
+// The only writer of the config file: 0700 directory, 0600 file.
+function writeConfigFile(file, data) {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+  // writeFileSync keeps the old mode when the file already exists.
+  try { fs.chmodSync(file, 0o600); } catch { /* best effort on Windows */ }
+}
+
+/**
+ * Remove one instance, or all when name is omitted. Removing all deletes the
+ * file even when it is corrupt, so a bad file never strands a key on disk.
+ */
 function removeInstance(name) {
   const file = configPath();
+  if (!name) {
+    if (!fs.existsSync(file)) return { file, removed: [] };
+    let removed = ['(unreadable config)'];
+    try { removed = readConfigFile(file).instances.map((i) => i.name); } catch { /* still delete */ }
+    fs.rmSync(file, { force: true });
+    return { file, removed };
+  }
   const current = readConfigFile(file);
   if (!current) return { file, removed: [] };
-  if (!name) {
-    fs.rmSync(file, { force: true });
-    return { file, removed: current.instances.map((i) => i.name) };
-  }
   const remaining = current.instances.filter((i) => i.name !== name);
   if (remaining.length === current.instances.length) return { file, removed: [] };
   if (remaining.length === 0) {
     fs.rmSync(file, { force: true });
   } else {
     const defaultInstance = current.defaultInstance === name ? remaining[0].name : current.defaultInstance;
-    fs.writeFileSync(file, JSON.stringify({ defaultInstance, instances: remaining }, null, 2) + '\n', { mode: 0o600 });
+    writeConfigFile(file, { defaultInstance, instances: remaining });
   }
   return { file, removed: [name] };
 }

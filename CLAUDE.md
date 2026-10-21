@@ -16,7 +16,7 @@ Currently tracks Dokploy **v0.29.5** (526 endpoints across 48 tools).
 ## Auth
 
 All endpoints use `x-api-key: <API_KEY>` header. Bearer auth is **rejected** by Dokploy.
-Credentials resolve in this order: `DOKPLOY_INSTANCES` (JSON), then `DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY`, then the file `dokploy login` writes (`~/.config/dokploy/config.json`, override with `DOKPLOY_CONFIG`). The key is never accepted as a CLI flag. CLI tests point `DOKPLOY_CONFIG` at a temp file so a developer's own login cannot leak in.
+Credentials resolve in this order: `DOKPLOY_INSTANCES` (JSON), then `DOKPLOY_BASE_URL` + `DOKPLOY_API_KEY`, then the file `dokploy login` writes (`$DOKPLOY_CONFIG`, else `$XDG_CONFIG_HOME/dokploy/config.json`, else `~/.config/dokploy/config.json`). The key is never accepted as a CLI flag. CLI tests point `DOKPLOY_CONFIG` at a temp file so a developer's own login cannot leak in.
 
 ## Tool naming
 

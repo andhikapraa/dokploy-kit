@@ -672,29 +672,64 @@ section('Config file: resolution order and saved default');
   fs.rmSync(TEST_CONFIG, { force: true });
 }
 
+section('Saved login: destructive and leaky edge cases');
+{
+  const seed = () => fs.writeFileSync(TEST_CONFIG, JSON.stringify({ defaultInstance: 'default', instances: [
+    { name: 'default', baseUrl: 'https://a/api', apiKey: 'SECRET-KEY-123' },
+  ] }));
+
+  seed();
+  let rr = spawnCli(['logout', '--help']);
+  assert(rr.status === 0 && /Usage: dokploy logout/.test(rr.stdout), 'logout --help prints usage');
+  assert(fs.existsSync(TEST_CONFIG), 'logout --help does not delete the saved login');
+
+  rr = spawnCli(['logout', '--name']);
+  assert(rr.status === 1 && /--name requires a value/.test(rr.stderr), 'logout with an empty --name fails');
+  assert(fs.existsSync(TEST_CONFIG), 'logout with an empty --name does not delete everything');
+
+  rr = spawnCli(['login', '--name', '--url', 'https://a'], { DOKPLOY_API_KEY: 'k' });
+  assert(rr.status === 1 && /--name requires a value/.test(rr.stderr), 'login with an empty --name fails instead of overwriting "default"');
+  rr = spawnCli(['login', '--url'], { DOKPLOY_API_KEY: 'k' });
+  assert(rr.status === 1 && /--url requires a value/.test(rr.stderr), 'login with an empty --url fails');
+
+  // A file that starts with the key: V8's JSON.parse message quotes it verbatim.
+  fs.writeFileSync(TEST_CONFIG, 'SECRET-KEY-123');
+  rr = spawnCli(['--list']);
+  assert(rr.status === 1 && !rr.stderr.includes('SECRET-KEY-123'), 'corrupt config error does not echo file content');
+  rr = spawnCli(['logout']);
+  assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout deletes a corrupt config instead of stranding the key');
+
+  rr = spawnCli(['--list'], { DOKPLOY_INSTANCES: 'SECRET-KEY-123' });
+  assert(rr.status === 1 && !rr.stderr.includes('SECRET-KEY-123'), 'invalid DOKPLOY_INSTANCES error does not echo its value');
+}
+
 section('Integration: login / logout against a local fake Dokploy');
 {
   // The CLI is spawned synchronously, so the fake API runs in its own process.
-  // It serves project.all: 200 for the right key, 401 otherwise.
-  const fakePort = 40000 + Math.floor(Math.random() * 20000);
+  // It listens on an OS-assigned port and reports it through a file; the kill
+  // is registered on process exit so a failing assertion cannot orphan it.
+  const portFile = path.join(TEST_CONFIG_DIR, 'fake-port');
   const fakeSrc = `
-    require('http').createServer((req, res) => {
+    const s = require('http').createServer((req, res) => {
       if (!req.url.startsWith('/api/project.all')) { res.writeHead(404).end(); return; }
       const ok = req.headers['x-api-key'] === 'good-key';
       res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
       res.end(ok ? '[]' : JSON.stringify({ message: 'Unauthorized' }));
-    }).listen(${fakePort}, '127.0.0.1');
+    });
+    s.listen(0, '127.0.0.1', () => require('fs').writeFileSync(${JSON.stringify(portFile)}, String(s.address().port)));
   `;
   const fake = require('child_process').spawn('node', ['-e', fakeSrc], { stdio: 'ignore' });
-  const panel = `http://127.0.0.1:${fakePort}`;
-  // Wait until the fake server accepts connections (up to 10 s).
-  spawnSync('node', ['-e', `
-    const end = Date.now() + 10000;
+  process.on('exit', () => { try { fake.kill(); } catch { /* already gone */ } });
+  // Wait for the port file and a successful request (up to 10 s).
+  const ready = spawnSync('node', ['-e', `
+    const fs = require('fs'); const end = Date.now() + 10000;
     (async function poll() {
-      try { await fetch('${panel}/api/project.all'); process.exit(0); }
+      try { const p = fs.readFileSync(${JSON.stringify(portFile)}, 'utf8'); await fetch('http://127.0.0.1:' + p + '/api/project.all'); process.exit(0); }
       catch { if (Date.now() > end) process.exit(1); setTimeout(poll, 100); }
     })();
   `], { timeout: 15_000 });
+  assert(ready.status === 0, 'fake Dokploy API started');
+  const panel = `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8')}`;
 
   let rr = spawnCli(['login', '--url', panel], { DOKPLOY_API_KEY: 'bad-key' });
   assert(rr.status === 1 && /rejected/i.test(rr.stderr), 'bad key is rejected before saving');
@@ -706,8 +741,9 @@ section('Integration: login / logout against a local fake Dokploy');
   });
   assert(rr.status === 0, 'login with a piped key succeeds');
   assert(!rr.stdout.includes('good-key') && !rr.stderr.includes('good-key'), 'API key is never echoed');
-  const savedCfg = JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8'));
-  assert(savedCfg.instances[0].baseUrl === `${panel}/api` && savedCfg.defaultInstance === 'default', 'saved URL is normalized to /api and becomes default');
+  const readCfg = () => { try { return JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8')); } catch { return { instances: [] }; } };
+  const savedCfg = readCfg();
+  assert(savedCfg.instances[0]?.baseUrl === `${panel}/api` && savedCfg.defaultInstance === 'default', 'saved URL is normalized to /api and becomes default');
   if (process.platform !== 'win32') {
     assert((fs.statSync(TEST_CONFIG).mode & 0o777) === 0o600, 'config file is mode 600');
   }
@@ -716,11 +752,11 @@ section('Integration: login / logout against a local fake Dokploy');
   assert(rr.status === 0 && rr.stdout.trim() === '[]', 'API calls use the saved login with no env vars');
 
   rr = spawnCli(['login', '--url', panel, '--name', 'second'], { DOKPLOY_API_KEY: 'good-key' });
-  const two = JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8'));
+  const two = readCfg();
   assert(rr.status === 0 && two.instances.length === 2 && two.defaultInstance === 'default', 'second login adds an instance and keeps the default');
 
   rr = spawnCli(['logout', '--name', 'second']);
-  assert(rr.status === 0 && JSON.parse(fs.readFileSync(TEST_CONFIG, 'utf8')).instances.length === 1, 'logout --name removes one instance');
+  assert(rr.status === 0 && readCfg().instances.length === 1, 'logout --name removes one instance');
   rr = spawnCli(['logout']);
   assert(rr.status === 0 && !fs.existsSync(TEST_CONFIG), 'logout removes the config file');
 
@@ -730,7 +766,6 @@ section('Integration: login / logout against a local fake Dokploy');
   rr = spawnCli(['login', '--url', panel, '--apiKey', 'x']);
   assert(rr.status === 1 && /Unknown flag/.test(rr.stderr), 'API key is not accepted as a flag');
 
-  fake.kill();
 }
 
 // --- Summary -----------------------------------------------------------------
