@@ -52,9 +52,12 @@ class DokployClient {
       if (response.status < 300 || response.status >= 400) break;
       const location = response.headers.get('location');
       const next = location ? new URL(location, current) : null;
-      if (!next || next.origin !== current.origin) {
+      if (!next) {
+        throw new Error(`Dokploy API error (${response.status}): redirect without a Location header`);
+      }
+      if (next.origin !== current.origin) {
         throw new Error(
-          `Dokploy API error (${response.status}): refusing to follow redirect to ${location || '(no Location header)'}. ` +
+          `Dokploy API error (${response.status}): refusing to follow redirect to ${location}. ` +
           'It points to a different origin, which would receive your API key. ' +
           'Use the final address as the base URL (for example https:// instead of http://).'
         );
@@ -65,6 +68,8 @@ class DokployClient {
         options.method = 'GET';
         delete options.body;
       }
+      // Release the redirect response before the next request.
+      await response.body?.cancel();
       current = next;
     }
 
