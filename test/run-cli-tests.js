@@ -845,6 +845,26 @@ section('Integration: login / logout against a local fake Dokploy');
   assert(rr.status === 1 && /redirect/i.test(rr.stderr), 'login refuses a redirecting panel URL');
   assert(!fs.existsSync(leakFile), 'the API key never reaches the redirect target');
   assert(!fs.existsSync(TEST_CONFIG), 'nothing is saved after a refused redirect');
+
+  // A same-origin redirect (path canonicalization) is followed and works.
+  const sameFile = path.join(TEST_CONFIG_DIR, 'same-port');
+  const sameSrc = `
+    const http = require('http'), fs = require('fs');
+    const s = http.createServer((q, r) => {
+      if (q.url.startsWith('/old/api/')) { r.writeHead(301, { Location: q.url.replace('/old/api/', '/api/') }); r.end(); return; }
+      const ok = q.url.startsWith('/api/project.all') && q.headers['x-api-key'] === 'good-key';
+      r.writeHead(ok ? 200 : 401, {'Content-Type':'application/json'}); r.end(ok ? '[]' : '{"message":"no"}');
+    });
+    s.listen(0, '127.0.0.1', () => fs.writeFileSync(${JSON.stringify(sameFile)}, String(s.address().port)));
+  `;
+  const same = spawnAsync('node', ['-e', sameSrc], { stdio: 'ignore' });
+  process.on('exit', () => { try { same.kill(); } catch { /* gone */ } });
+  const swait = Date.now() + 10_000;
+  while (!fs.existsSync(sameFile) && Date.now() < swait) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
+  rr = spawnCli(['login', '--url', `http://127.0.0.1:${fs.readFileSync(sameFile, 'utf8')}/old`], { DOKPLOY_API_KEY: 'good-key' });
+  assert(rr.status === 0, 'login follows a same-origin redirect');
+  spawnCli(['logout']);
+  same.kill();
   redir.kill();
 
   rr = spawnCli(['login', '--url', 'http://127.0.0.1:1'], { DOKPLOY_API_KEY: 'good-key' });
