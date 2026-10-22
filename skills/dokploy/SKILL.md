@@ -200,10 +200,13 @@ dokploy domain create --applicationId app_... --host "api.example.com" \
 After `application deploy` (or a push that auto-deploys), wait with one command instead of a shell loop. Agent sandboxes often refuse `while`/`until`/`sleep` loops, so each poll would need an approval:
 
 ```bash
-dokploy deployment wait --applicationId app_...   # or --composeId; --timeout MIN (default 15)
+dokploy deployment wait --applicationId app_...         # right after `application deploy`
+dokploy deployment wait --applicationId app_... --new   # after a git push (auto-deploy)
 ```
 
-It prints status changes to stderr and the final deployment as JSON. Exit 0 means `done`, 3 means `error` or `cancelled` (it prints the `readLogs` command to run), 4 means it timed out.
+`--composeId` works the same for compose services; `--timeout MIN` defaults to 15. It prints status changes to stderr and the final deployment as JSON. Exit 0 means `done`, 3 means `error` or `cancelled` (it prints the `readLogs` command to run), 4 means it timed out. Transient API errors are retried.
+
+`application deploy` creates its deployment before it returns, so plain `wait` follows it. After a push, the webhook may create the deployment a few seconds later; `--new` ignores deployments that existed when `wait` started, so it cannot report the previous one. A deploy triggered while another is still running is queued after it, so the wait can cover both.
 
 ### Inspect logs / status
 

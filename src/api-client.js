@@ -15,11 +15,13 @@ class DokployClient {
    * @param {string} method - HTTP method
    * @param {Object} queryParams - Query parameters
    * @param {Object|null} body - Request body for POST/PUT
+   * @param {{timeoutMs?: number}} [opts] - timeoutMs aborts the whole request,
+   *   redirects included, after that many milliseconds.
    * @returns {Promise<Object|string|null>} Parsed JSON, raw text for non-JSON
    *   bodies, or null when the response body is empty (Dokploy procedures that
    *   return void respond 200 with an empty body).
    */
-  async request(path, method = 'GET', queryParams = {}, body = null) {
+  async request(path, method = 'GET', queryParams = {}, body = null, { timeoutMs } = {}) {
     const url = new URL(`${this.baseUrl}${path}`);
 
     // Add query parameters
@@ -40,6 +42,7 @@ class DokployClient {
     // ourselves: same-origin hops are safe and keep canonicalizing setups
     // working; a hop to another origin (scheme, host, or port) is refused.
     const options = { method, headers, redirect: 'manual' };
+    if (timeoutMs) options.signal = AbortSignal.timeout(timeoutMs);
 
     if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(body);
