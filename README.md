@@ -141,6 +141,13 @@ dokploy login --name main    --url https://dokploy-a --default   # switch the de
 dokploy logout --name staging                                    # or `dokploy logout` for all
 ```
 
+Waiting for a deploy is one command, so agents need no shell loop:
+
+```bash
+dokploy application deploy --applicationId app_...
+dokploy deployment wait --applicationId app_...   # exit 0 done, 3 error/cancelled, 4 timeout
+```
+
 Env vars still work and override the saved login, which suits CI and `direnv`:
 
 ```bash

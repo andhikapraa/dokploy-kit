@@ -875,6 +875,56 @@ section('Integration: login / logout against a local fake Dokploy');
 
 }
 
+section('Integration: deployment wait against a local fake Dokploy');
+{
+  // Fake API whose newest deployment flips from running to a final status
+  // after a few polls. App "ok" ends done, "bad" ends error, "slow" never ends.
+  const portFile = path.join(TEST_CONFIG_DIR, 'wait-port');
+  const fakeSrc = `
+    const polls = {};
+    const s = require('http').createServer((req, res) => {
+      const u = new URL(req.url, 'http://x');
+      const id = u.searchParams.get('applicationId') || u.searchParams.get('composeId');
+      polls[id] = (polls[id] || 0) + 1;
+      const final = id === 'ok' ? 'done' : id === 'bad' ? 'error' : 'running';
+      const status = polls[id] >= 3 ? final : 'running';
+      const list = id === 'none' ? [] : [
+        { deploymentId: 'old', status: 'done', createdAt: '2026-01-01T00:00:00Z', title: 'older' },
+        { deploymentId: 'new-' + id, status, createdAt: '2026-01-02T00:00:00Z', title: 'newest' },
+      ];
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(list));
+    });
+    s.listen(0, '127.0.0.1', () => require('fs').writeFileSync(${JSON.stringify(portFile)}, String(s.address().port)));
+  `;
+  const fake = require('child_process').spawn('node', ['-e', fakeSrc], { stdio: 'ignore' });
+  process.on('exit', () => { try { fake.kill(); } catch { /* gone */ } });
+  const end = Date.now() + 10_000;
+  while (!fs.existsSync(portFile) && Date.now() < end) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
+  const env = { DOKPLOY_BASE_URL: `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8')}/api`, DOKPLOY_API_KEY: 'k' };
+
+  let rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok', '--interval', '1'], env);
+  const done = parseJsonOrFail(rr.stdout, 'wait done');
+  assert(rr.status === 0 && done?.deploymentId === 'new-ok' && done?.status === 'done', 'wait exits 0 with the newest deployment once it is done');
+  assert(/running/.test(rr.stderr) && /done/.test(rr.stderr), 'wait reports status changes on stderr');
+
+  rr = spawnCli(['deployment', 'wait', '--composeId', 'bad', '--interval', '1'], env);
+  assert(rr.status === 3 && /readLogs --deploymentId new-bad/.test(rr.stderr), 'wait exits 3 on error and points to the build log');
+
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'slow', '--interval', '1', '--timeout', '0.05'], env);
+  assert(rr.status === 4 && /Still running/.test(rr.stderr), 'wait exits 4 on timeout');
+
+  rr = spawnCli(['deployment', 'wait'], env);
+  assert(rr.status === 1 && /exactly one of --applicationId or --composeId/.test(rr.stderr), 'wait requires one target');
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok', '--bogus', 'x'], env);
+  assert(rr.status === 1 && /Unknown flag/.test(rr.stderr), 'wait rejects unknown flags');
+  rr = spawnCli(['deployment'], env);
+  assert(rr.status === 0 && /wait\s+\(client-side/.test(rr.stdout), 'deployment domain help lists wait');
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok']);
+  assert(rr.status === 1 && /Not logged in/.test(rr.stderr), 'wait without auth exits 1');
+  fake.kill();
+}
+
 // --- Summary -----------------------------------------------------------------
 
 console.log('\n' + '='.repeat(50));

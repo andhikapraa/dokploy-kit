@@ -195,6 +195,16 @@ dokploy domain create --applicationId app_... --host "api.example.com" \
 
 `--certificateType` is an enum: `letsencrypt | none | custom`.
 
+### Wait for a deploy
+
+After `application deploy` (or a push that auto-deploys), wait with one command instead of a shell loop. Agent sandboxes often refuse `while`/`until`/`sleep` loops, so each poll would need an approval:
+
+```bash
+dokploy deployment wait --applicationId app_...   # or --composeId; --timeout MIN (default 15)
+```
+
+It prints status changes to stderr and the final deployment as JSON. Exit 0 means `done`, 3 means `error` or `cancelled` (it prints the `readLogs` command to run), 4 means it timed out.
+
 ### Inspect logs / status
 
 ```bash

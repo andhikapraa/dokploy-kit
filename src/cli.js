@@ -191,6 +191,71 @@ function requireValue(flags, key) {
   return flags[key];
 }
 
+/**
+ * `dokploy deployment wait --applicationId ID | --composeId ID [--timeout MIN] [--interval SEC]`
+ *
+ * Blocks until the newest deployment of an application or compose service
+ * finishes, then prints it as JSON. Exits 0 when it is `done`, 3 when it is
+ * `error` or `cancelled`, 4 on timeout. One plain command, so agents do not
+ * need shell loops (which their sandboxes often refuse) to wait for a deploy.
+ *
+ * A deployment that started before the wait began still counts: the newest
+ * one is what the caller just triggered or what a push started.
+ */
+async function cmdDeploymentWait(flags, client) {
+  const known = new Set(['applicationId', 'composeId', 'timeout', 'interval', 'help']);
+  const unknown = Object.keys(flags).filter((k) => !known.has(k));
+  if (unknown.length) fail(`Unknown flag(s) for deployment wait: ${unknown.map((k) => `--${k}`).join(', ')}`);
+  if (flags.help) {
+    process.stdout.write(
+      'Usage: dokploy deployment wait (--applicationId ID | --composeId ID) [--timeout MIN] [--interval SEC]\n\n' +
+      'Waits for the newest deployment to finish and prints it as JSON.\n' +
+      '  --timeout   Minutes to wait (default 15)\n' +
+      '  --interval  Seconds between checks (default 10)\n\n' +
+      'Exit codes: 0 done, 3 error or cancelled, 4 timed out.\n'
+    );
+    return;
+  }
+  const appId = requireValue(flags, 'applicationId');
+  const composeId = requireValue(flags, 'composeId');
+  if (!appId === !composeId) fail('Pass exactly one of --applicationId or --composeId');
+  const timeoutMin = flags.timeout === undefined ? 15 : Number(requireValue(flags, 'timeout'));
+  const intervalSec = flags.interval === undefined ? 10 : Number(requireValue(flags, 'interval'));
+  if (!(timeoutMin > 0) || !(intervalSec >= 1)) fail('--timeout must be > 0 minutes and --interval at least 1 second');
+
+  const [apiPath, query] = appId
+    ? ['/deployment.all', { applicationId: appId }]
+    : ['/deployment.allByCompose', { composeId }];
+  const deadline = Date.now() + timeoutMin * 60_000;
+  let lastStatus;
+  for (;;) {
+    let list;
+    try { list = await client.request(apiPath, 'GET', query, null); } catch (e) { fail(e.message, 2); }
+    const newest = (Array.isArray(list) ? list : [])
+      .slice()
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    if (!newest) {
+      if (Date.now() > deadline) fail('No deployment found before the timeout. Start one with `application deploy`.', 4);
+    } else {
+      if (newest.status !== lastStatus) {
+        process.stderr.write(`${new Date().toISOString()}  ${newest.status}  ${newest.deploymentId}  ${String(newest.title || '').split('\n')[0].slice(0, 70)}\n`);
+        lastStatus = newest.status;
+      }
+      if (newest.status === 'done') {
+        process.stdout.write(JSON.stringify(newest, null, 2) + '\n');
+        return;
+      }
+      if (newest.status === 'error' || newest.status === 'cancelled') {
+        process.stdout.write(JSON.stringify(newest, null, 2) + '\n');
+        process.stderr.write(`Deployment ${newest.status}. Read the build log: dokploy deployment readLogs --deploymentId ${newest.deploymentId} --tail 200\n`);
+        process.exit(3);
+      }
+      if (Date.now() > deadline) fail(`Still ${newest.status} after ${timeoutMin} min (deployment ${newest.deploymentId}).`, 4);
+    }
+    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+  }
+}
+
 /** `dokploy logout [--name NAME]` removes one saved instance, or all of them. */
 function cmdLogout(flags) {
   const unknown = Object.keys(flags).filter((k) => !['name', 'help'].includes(k));
@@ -491,6 +556,8 @@ ${usageLine}
   dokploy instances                    List configured instances (JSON)
   dokploy login [--url URL] [--name N] Save a Dokploy URL + API key (see login --help)
   dokploy logout [--name N]            Remove a saved login
+  dokploy deployment wait --applicationId ID
+                                       Wait for the newest deployment to finish (exit 0 done, 3 error)
 
 Auth (${config.configPath()}; env vars win when set):
 ${authSection}
@@ -514,7 +581,7 @@ function printDomainHelp(domain, actions) {
 
 Actions (${names.length}):
 ${names.map((a) => `  ${a}  (${actions[a].method} /${actions[a].operationId.replace(/-/g, '.')})`).join('\n')}
-
+${domain === 'deployment' ? '  wait  (client-side: waits for the newest deployment to finish)\n' : ''}
 Run \`dokploy ${domain} <action> --help\` for parameter details.
 `);
 }
@@ -812,6 +879,13 @@ async function main() {
     }
     printInstances(instances, defaultInstance);
     return;
+  }
+
+  // `dokploy deployment wait` is a client-side helper, not an API endpoint.
+  if (positional[0] === 'deployment' && positional[1] === 'wait') {
+    if (positional.length > 2) fail(`Unexpected arguments after 'deployment wait': ${positional.slice(2).join(' ')}`);
+    if (instances.length === 0) fail(NOT_LOGGED_IN);
+    return cmdDeploymentWait(flags, pickClient(instances, defaultInstance, globalFlags.instance));
   }
 
   // Reject extra positional tokens — `dokploy project create extra --name foo`
