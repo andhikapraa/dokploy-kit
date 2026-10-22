@@ -194,8 +194,8 @@ function requireValue(flags, key) {
 const DEPLOYMENT_WAIT_HELP =
   'Usage: dokploy deployment wait (--applicationId ID | --composeId ID) [--new] [--timeout MIN] [--interval SEC]\n\n' +
   'Waits for the newest deployment to finish and prints it as JSON.\n' +
-  '  --new       Ignore deployments that already exist when wait starts, and wait for the next one.\n' +
-  '              Use it after a git push, where the webhook can create the deployment a few seconds later.\n' +
+  '  --new       Only count deployments created after wait starts (by the server clock).\n' +
+  '              Start it right after a git push, where the webhook can create the deployment a few seconds later.\n' +
   '              Not needed right after `application deploy`, which creates the deployment before it returns.\n' +
   '  --timeout   Minutes to wait (default 15)\n' +
   '  --interval  Seconds between checks (default 10)\n\n' +
@@ -211,8 +211,8 @@ const DEPLOYMENT_WAIT_HELP =
  *
  * `application deploy` creates its deployment row before returning, so plain
  * `wait` right after it sees the new one. A git push creates the row only when
- * the webhook arrives, so `--new` snapshots the existing IDs first and waits
- * for one that was not there.
+ * the webhook arrives, so `--new` only counts deployments whose createdAt is
+ * after the server time at which wait started.
  */
 async function cmdDeploymentWait(flags, client) {
   const known = new Set(['applicationId', 'composeId', 'timeout', 'interval', 'new', 'help']);
@@ -245,18 +245,28 @@ async function cmdDeploymentWait(flags, client) {
       const list = await client.request(apiPath, 'GET', query, null, { timeoutMs: Math.max(1000, remaining()) });
       return Array.isArray(list) ? list : [];
     } catch (e) {
-      // 4xx will not recover (bad ID, revoked key); anything else may be a blip.
-      if (/\(4\d\d\)/.test(e.message)) fail(e.message, 2);
+      // Retry only what can recover: a request timeout, a network failure
+      // (fetch throws TypeError), or a 5xx. Anything else, such as a 4xx or a
+      // refused redirect, fails now instead of looping until the deadline.
+      const transient = e.name === 'TimeoutError' || e.name === 'TypeError' || /^Dokploy API error \(5\d\d\)/.test(e.message);
+      if (!transient) fail(e.message, 2);
       process.stderr.write(`${new Date().toISOString()}  poll failed, retrying: ${e.message}\n`);
       return null;
     }
   };
 
-  let existingIds = null;
+  // --new: the boundary is the server's own clock when wait starts, taken from
+  // the HTTP Date header of the first response, so a deployment created while
+  // that first request is in flight still counts. The header has 1 s
+  // resolution, so step back 1 s; a deployment that finished just before wait
+  // started could only match if it is less than a second old.
+  let since = null;
   if (flags.new) {
     for (;;) {
       const first = await poll();
-      if (first) { existingIds = new Set(first.map((d) => d.deploymentId)); break; }
+      const serverNow = client.lastServerDate ? Date.parse(client.lastServerDate) : NaN;
+      if (first && Number.isFinite(serverNow)) { since = serverNow - 1000; break; }
+      if (first) fail('--new needs the server Date header to set its start time, and the response had none.', 2);
       if (remaining() === 0) fail(`Timed out after ${timeoutMin} min before the first successful poll.`, 4);
       await sleep(Math.min(intervalSec * 1000, remaining()));
     }
@@ -267,7 +277,7 @@ async function cmdDeploymentWait(flags, client) {
     const list = await poll();
     if (list) {
       const newest = list
-        .filter((d) => !existingIds || !existingIds.has(d.deploymentId))
+        .filter((d) => since === null || Date.parse(d.createdAt) >= since)
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
       if (newest) {
         if (newest.status !== lastStatus) {
@@ -287,7 +297,7 @@ async function cmdDeploymentWait(flags, client) {
         }
       }
       if (remaining() === 0) {
-        const what = newest ? `Still ${newest.status} (deployment ${newest.deploymentId})` : (existingIds ? 'No new deployment appeared' : 'No deployment found');
+        const what = newest ? `Still ${newest.status} (deployment ${newest.deploymentId})` : (since !== null ? 'No new deployment appeared' : 'No deployment found');
         process.stderr.write(`Error: ${what} after ${timeoutMin} min.\n`);
         process.exitCode = 4;
         return;

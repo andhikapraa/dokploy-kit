@@ -206,7 +206,7 @@ dokploy deployment wait --applicationId app_... --new   # after a git push (auto
 
 `--composeId` works the same for compose services; `--timeout MIN` defaults to 15. It prints status changes to stderr and the final deployment as JSON. Exit 0 means `done`, 3 means `error` or `cancelled` (it prints the `readLogs` command to run), 4 means it timed out. Transient API errors are retried.
 
-`application deploy` creates its deployment before it returns, so plain `wait` follows it. After a push, the webhook may create the deployment a few seconds later; `--new` ignores deployments that existed when `wait` started, so it cannot report the previous one. A deploy triggered while another is still running is queued after it, so the wait can cover both.
+`application deploy` creates its deployment before it returns, so plain `wait` follows it. After a push, the webhook may create the deployment a few seconds later. Run `wait --new` right after the push: it only counts deployments created after `wait` started, measured on the server's clock (the HTTP Date header), so it cannot report the previous deployment, and a deployment created while its first request is in flight still counts. A deploy triggered while another is still running is queued after it, so the wait can cover both.
 
 ### Inspect logs / status
 

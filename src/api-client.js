@@ -42,7 +42,8 @@ class DokployClient {
     // ourselves: same-origin hops are safe and keep canonicalizing setups
     // working; a hop to another origin (scheme, host, or port) is refused.
     const options = { method, headers, redirect: 'manual' };
-    if (timeoutMs) options.signal = AbortSignal.timeout(timeoutMs);
+    // AbortSignal.timeout needs an integer delay that fits a signed 32-bit timer.
+    if (timeoutMs) options.signal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2 ** 31 - 1));
 
     if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(body);
@@ -90,6 +91,9 @@ class DokployClient {
       throw new Error(`Dokploy API error (${response.status}): ${errorMsg}`);
     }
 
+    // Server clock at response time (HTTP Date header, 1 s resolution), for
+    // callers that compare against server-side timestamps such as createdAt.
+    this.lastServerDate = response.headers.get('date') || null;
     return data;
   }
 }

@@ -148,7 +148,7 @@ dokploy application deploy --applicationId app_...
 dokploy deployment wait --applicationId app_...   # exit 0 done, 3 error/cancelled, 4 timeout
 ```
 
-After a `git push` that auto-deploys, add `--new` so `wait` ignores deployments that already existed and waits for the one the push starts.
+After a `git push` that auto-deploys, run `wait --new` right after the push. It only counts deployments created after `wait` started, on the server's clock, so it waits for the one the push starts.
 
 Env vars still work and override the saved login, which suits CI and `direnv`:
 

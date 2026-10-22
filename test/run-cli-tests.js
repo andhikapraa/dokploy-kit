@@ -885,6 +885,11 @@ section('Integration: deployment wait against a local fake Dokploy');
   const portFile = path.join(TEST_CONFIG_DIR, 'wait-port');
   const fakeSrc = `
     const polls = {};
+    // The "late" deployment is created at the moment of its 2nd poll, i.e.
+    // after wait has started, like a push webhook arriving a few seconds late.
+    // "racy" creates it during the very first poll, before that response is
+    // sent, the case where an ID snapshot would wrongly exclude it.
+    const createdAt = {};
     const s = require('http').createServer((req, res) => {
       const u = new URL(req.url, 'http://x');
       const isCompose = u.searchParams.has('composeId');
@@ -892,13 +897,16 @@ section('Integration: deployment wait against a local fake Dokploy');
       const id = u.searchParams.get('applicationId') || u.searchParams.get('composeId');
       const n = polls[id] = (polls[id] || 0) + 1;
       if (id === 'flaky' && n === 1) { res.writeHead(502).end('bad gateway'); return; }
-      const finalOf = { ok: 'done', bad: 'error', flaky: 'done', late: 'done' };
       const old = { deploymentId: 'old', status: 'done', createdAt: '2026-01-01T00:00:00Z', title: 'older' };
+      const finalOf = { ok: 'done', bad: 'error', flaky: 'done' };
       let list;
       if (id === 'none') list = [];
-      else if (id === 'late') list = n >= 3 ? [old, { deploymentId: 'new-late', status: n >= 4 ? 'done' : 'running', createdAt: '2026-01-02T00:00:00Z' }] : [old];
-      else list = [old, { deploymentId: 'new-' + id, status: n >= 3 ? (finalOf[id] || 'running') : 'running', createdAt: '2026-01-02T00:00:00Z', title: 'newest' }];
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      else if (id === 'late' || id === 'racy') {
+        const startAt = id === 'late' ? 2 : 1;
+        if (n >= startAt && !createdAt[id]) createdAt[id] = new Date(Date.now() + 1500).toISOString();
+        list = createdAt[id] ? [old, { deploymentId: 'new-' + id, status: n >= startAt + 2 ? 'done' : 'running', createdAt: createdAt[id] }] : [old];
+      } else list = [old, { deploymentId: 'new-' + id, status: n >= 3 ? (finalOf[id] || 'running') : 'running', createdAt: '2026-01-02T00:00:00Z', title: 'newest' }];
+      res.writeHead(200, { 'Content-Type': 'application/json', Date: new Date().toUTCString() });
       res.end(JSON.stringify(list));
     });
     s.listen(0, '127.0.0.1', () => require('fs').writeFileSync(${JSON.stringify(portFile)}, String(s.address().port)));
@@ -927,6 +935,10 @@ section('Integration: deployment wait against a local fake Dokploy');
   assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'late no --new')?.deploymentId === 'old', 'without --new, wait accepts the newest existing deployment');
   rr = wait(['--applicationId', 'late', '--new']);
   assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'late --new')?.deploymentId === 'new-late', 'with --new, wait ignores existing deployments and waits for the next one');
+  rr = wait(['--applicationId', 'racy', '--new']);
+  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'racy --new')?.deploymentId === 'new-racy', 'with --new, a deployment created during the first poll still counts');
+  rr = wait(['--applicationId', 'ok', '--timeout', '0.0333']);
+  assert(rr.status === 0, 'a fractional --timeout does not break the request timeout');
 
   const t0 = Date.now();
   rr = wait(['--applicationId', 'slow', '--timeout', '0.05']);
