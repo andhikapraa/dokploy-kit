@@ -258,8 +258,9 @@ async function cmdDeploymentWait(flags, client) {
   // --new: the boundary is the server's own clock when wait starts, taken from
   // the HTTP Date header of the first response, so a deployment created while
   // that first request is in flight still counts. The header has 1 s
-  // resolution, so step back 1 s; a deployment that finished just before wait
-  // started could only match if it is less than a second old.
+  // resolution, so step back 1 s. That lets a deployment created less than a
+  // second before wait started match too, which is harmless; one created
+  // earlier does not count.
   let since = null;
   if (flags.new) {
     for (;;) {

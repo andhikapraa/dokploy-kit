@@ -885,10 +885,11 @@ section('Integration: deployment wait against a local fake Dokploy');
   const portFile = path.join(TEST_CONFIG_DIR, 'wait-port');
   const fakeSrc = `
     const polls = {};
-    // The "late" deployment is created at the moment of its 2nd poll, i.e.
-    // after wait has started, like a push webhook arriving a few seconds late.
-    // "racy" creates it during the very first poll, before that response is
-    // sent, the case where an ID snapshot would wrongly exclude it.
+    // Per-ID poll counters, so each case starts from poll 1. "late" creates its
+    // deployment on the 2nd poll, after wait has seen it absent, like a push
+    // webhook arriving a few seconds late. "racy" creates it while the very
+    // first request is being answered, the case an ID snapshot would exclude.
+    // "stale" only ever has the old deployment.
     const createdAt = {};
     const s = require('http').createServer((req, res) => {
       const u = new URL(req.url, 'http://x');
@@ -901,9 +902,10 @@ section('Integration: deployment wait against a local fake Dokploy');
       const finalOf = { ok: 'done', bad: 'error', flaky: 'done' };
       let list;
       if (id === 'none') list = [];
+      else if (id === 'stale') list = [old];
       else if (id === 'late' || id === 'racy') {
         const startAt = id === 'late' ? 2 : 1;
-        if (n >= startAt && !createdAt[id]) createdAt[id] = new Date(Date.now() + 1500).toISOString();
+        if (n >= startAt && !createdAt[id]) createdAt[id] = new Date().toISOString();
         list = createdAt[id] ? [old, { deploymentId: 'new-' + id, status: n >= startAt + 2 ? 'done' : 'running', createdAt: createdAt[id] }] : [old];
       } else list = [old, { deploymentId: 'new-' + id, status: n >= 3 ? (finalOf[id] || 'running') : 'running', createdAt: '2026-01-02T00:00:00Z', title: 'newest' }];
       res.writeHead(200, { 'Content-Type': 'application/json', Date: new Date().toUTCString() });
@@ -931,8 +933,8 @@ section('Integration: deployment wait against a local fake Dokploy');
   rr = wait(['--applicationId', 'flaky']);
   assert(rr.status === 0 && /poll failed, retrying/.test(rr.stderr), 'wait retries a transient 502 instead of giving up');
 
-  rr = wait(['--applicationId', 'late']);
-  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'late no --new')?.deploymentId === 'old', 'without --new, wait accepts the newest existing deployment');
+  rr = wait(['--applicationId', 'stale']);
+  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'stale no --new')?.deploymentId === 'old', 'without --new, wait accepts the newest existing deployment');
   rr = wait(['--applicationId', 'late', '--new']);
   assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'late --new')?.deploymentId === 'new-late', 'with --new, wait ignores existing deployments and waits for the next one');
   rr = wait(['--applicationId', 'racy', '--new']);
