@@ -191,6 +191,127 @@ function requireValue(flags, key) {
   return flags[key];
 }
 
+const DEPLOYMENT_WAIT_HELP =
+  'Usage: dokploy deployment wait (--applicationId ID | --composeId ID) [--new] [--timeout MIN] [--interval SEC]\n\n' +
+  'Waits for the newest deployment to finish and prints it as JSON.\n' +
+  '  --new       Only count deployments created after wait starts (by the server clock).\n' +
+  '              Start it right after a git push, where the webhook can create the deployment a few seconds later.\n' +
+  '              Not needed right after `application deploy`, which creates the deployment before it returns.\n' +
+  '  --timeout   Minutes to wait (default 15)\n' +
+  '  --interval  Seconds between checks (default 10)\n\n' +
+  'Exit codes: 0 done, 3 error or cancelled, 4 timed out. Transient API errors are retried until the timeout.\n';
+
+/**
+ * `dokploy deployment wait (--applicationId ID | --composeId ID) [--new] [--timeout MIN] [--interval SEC]`
+ *
+ * Blocks until the newest deployment of an application or compose service
+ * finishes, then prints it as JSON. Exits 0 when it is `done`, 3 when it is
+ * `error` or `cancelled`, 4 on timeout. One plain command, so agents do not
+ * need shell loops (which their sandboxes often refuse) to wait for a deploy.
+ *
+ * `application deploy` creates its deployment row before returning, so plain
+ * `wait` right after it sees the new one. A git push creates the row only when
+ * the webhook arrives, so `--new` only counts deployments whose createdAt is
+ * after the server time at which wait started.
+ */
+async function cmdDeploymentWait(flags, client) {
+  const known = new Set(['applicationId', 'composeId', 'timeout', 'interval', 'new', 'help']);
+  const unknown = Object.keys(flags).filter((k) => !known.has(k));
+  if (unknown.length) fail(`Unknown flag(s) for deployment wait: ${unknown.map((k) => `--${k}`).join(', ')}`);
+  if (flags.help) {
+    process.stdout.write(DEPLOYMENT_WAIT_HELP);
+    return;
+  }
+  const appId = requireValue(flags, 'applicationId');
+  const composeId = requireValue(flags, 'composeId');
+  if (!appId === !composeId) fail('Pass exactly one of --applicationId or --composeId');
+  if (flags.new !== undefined && flags.new !== true) fail('--new takes no value');
+  const timeoutMin = flags.timeout === undefined ? 15 : Number(requireValue(flags, 'timeout'));
+  const intervalSec = flags.interval === undefined ? 10 : Number(requireValue(flags, 'interval'));
+  if (!Number.isFinite(timeoutMin) || !Number.isFinite(intervalSec) || !(timeoutMin > 0) || !(intervalSec >= 1)) {
+    fail('--timeout must be a number > 0 (minutes) and --interval a number >= 1 (seconds)');
+  }
+
+  const [apiPath, query] = appId
+    ? ['/deployment.all', { applicationId: appId }]
+    : ['/deployment.allByCompose', { composeId }];
+  const deadline = Date.now() + timeoutMin * 60_000;
+  const remaining = () => Math.max(0, deadline - Date.now());
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // One poll, bounded by the time left. Returns null on a transient failure.
+  const poll = async () => {
+    try {
+      const list = await client.request(apiPath, 'GET', query, null, { timeoutMs: Math.max(1000, remaining()) });
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      // Retry only what can recover: a request timeout, a network failure
+      // (fetch throws TypeError), or a 5xx. Anything else, such as a 4xx or a
+      // refused redirect, fails now instead of looping until the deadline.
+      const transient = e.name === 'TimeoutError' || e.name === 'TypeError' || /^Dokploy API error \(5\d\d\)/.test(e.message);
+      if (!transient) fail(e.message, 2);
+      process.stderr.write(`${new Date().toISOString()}  poll failed, retrying: ${e.message}\n`);
+      return null;
+    }
+  };
+
+  // --new: the boundary is the server's own clock when wait starts, taken from
+  // the HTTP Date header of the first response, so a deployment created while
+  // that first request is in flight still counts. The header has 1 s
+  // resolution, so step back 1 s. That lets a deployment created less than a
+  // second before wait started match too, which is harmless; one created
+  // earlier does not count.
+  let since = null;
+  if (flags.new) {
+    for (;;) {
+      const first = await poll();
+      const serverNow = client.lastServerDate ? Date.parse(client.lastServerDate) : NaN;
+      if (first && Number.isFinite(serverNow)) { since = serverNow - 1000; break; }
+      if (first) fail('--new needs the server Date header to set its start time, and the response had none.', 2);
+      if (remaining() === 0) fail(`Timed out after ${timeoutMin} min before the first successful poll.`, 4);
+      await sleep(Math.min(intervalSec * 1000, remaining()));
+    }
+  }
+
+  let lastStatus;
+  for (;;) {
+    const list = await poll();
+    if (list) {
+      const newest = list
+        .filter((d) => since === null || Date.parse(d.createdAt) >= since)
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+      if (newest) {
+        if (newest.status !== lastStatus) {
+          process.stderr.write(`${new Date().toISOString()}  ${newest.status}  ${newest.deploymentId}  ${String(newest.title || '').split('\n')[0].slice(0, 70)}\n`);
+          lastStatus = newest.status;
+        }
+        if (newest.status === 'done') {
+          process.stdout.write(JSON.stringify(newest, null, 2) + '\n');
+          return;
+        }
+        if (newest.status === 'error' || newest.status === 'cancelled') {
+          process.stdout.write(JSON.stringify(newest, null, 2) + '\n');
+          process.stderr.write(`Deployment ${newest.status}. Read the build log: dokploy deployment readLogs --deploymentId ${newest.deploymentId} --tail 200\n`);
+          // exitCode instead of exit() so piped stdout/stderr are flushed first.
+          process.exitCode = 3;
+          return;
+        }
+      }
+      if (remaining() === 0) {
+        const what = newest ? `Still ${newest.status} (deployment ${newest.deploymentId})` : (since !== null ? 'No new deployment appeared' : 'No deployment found');
+        process.stderr.write(`Error: ${what} after ${timeoutMin} min.\n`);
+        process.exitCode = 4;
+        return;
+      }
+    } else if (remaining() === 0) {
+      process.stderr.write(`Error: timed out after ${timeoutMin} min; the last poll failed.\n`);
+      process.exitCode = 4;
+      return;
+    }
+    await sleep(Math.min(intervalSec * 1000, remaining()));
+  }
+}
+
 /** `dokploy logout [--name NAME]` removes one saved instance, or all of them. */
 function cmdLogout(flags) {
   const unknown = Object.keys(flags).filter((k) => !['name', 'help'].includes(k));
@@ -491,6 +612,8 @@ ${usageLine}
   dokploy instances                    List configured instances (JSON)
   dokploy login [--url URL] [--name N] Save a Dokploy URL + API key (see login --help)
   dokploy logout [--name N]            Remove a saved login
+  dokploy deployment wait (--applicationId ID | --composeId ID) [--new]
+                                       Wait for the newest deployment to finish (exit 0 done, 3 error)
 
 Auth (${config.configPath()}; env vars win when set):
 ${authSection}
@@ -514,7 +637,7 @@ function printDomainHelp(domain, actions) {
 
 Actions (${names.length}):
 ${names.map((a) => `  ${a}  (${actions[a].method} /${actions[a].operationId.replace(/-/g, '.')})`).join('\n')}
-
+${domain === 'deployment' ? '  wait  (client-side: waits for the newest deployment to finish)\n' : ''}
 Run \`dokploy ${domain} <action> --help\` for parameter details.
 `);
 }
@@ -812,6 +935,14 @@ async function main() {
     }
     printInstances(instances, defaultInstance);
     return;
+  }
+
+  // `dokploy deployment wait` is a client-side helper, not an API endpoint.
+  if (positional[0] === 'deployment' && positional[1] === 'wait') {
+    if (positional.length > 2) fail(`Unexpected arguments after 'deployment wait': ${positional.slice(2).join(' ')}`);
+    if (flags.help) { process.stdout.write(DEPLOYMENT_WAIT_HELP); return; }
+    if (instances.length === 0) fail(NOT_LOGGED_IN);
+    return cmdDeploymentWait(flags, pickClient(instances, defaultInstance, globalFlags.instance));
   }
 
   // Reject extra positional tokens — `dokploy project create extra --name foo`

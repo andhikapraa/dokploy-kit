@@ -15,11 +15,13 @@ class DokployClient {
    * @param {string} method - HTTP method
    * @param {Object} queryParams - Query parameters
    * @param {Object|null} body - Request body for POST/PUT
+   * @param {{timeoutMs?: number}} [opts] - timeoutMs aborts the whole request,
+   *   redirects included, after that many milliseconds.
    * @returns {Promise<Object|string|null>} Parsed JSON, raw text for non-JSON
    *   bodies, or null when the response body is empty (Dokploy procedures that
    *   return void respond 200 with an empty body).
    */
-  async request(path, method = 'GET', queryParams = {}, body = null) {
+  async request(path, method = 'GET', queryParams = {}, body = null, { timeoutMs } = {}) {
     const url = new URL(`${this.baseUrl}${path}`);
 
     // Add query parameters
@@ -40,6 +42,8 @@ class DokployClient {
     // ourselves: same-origin hops are safe and keep canonicalizing setups
     // working; a hop to another origin (scheme, host, or port) is refused.
     const options = { method, headers, redirect: 'manual' };
+    // AbortSignal.timeout needs an integer delay that fits a signed 32-bit timer.
+    if (timeoutMs) options.signal = AbortSignal.timeout(Math.min(Math.max(1, Math.ceil(timeoutMs)), 2 ** 31 - 1));
 
     if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.body = JSON.stringify(body);
@@ -87,6 +91,9 @@ class DokployClient {
       throw new Error(`Dokploy API error (${response.status}): ${errorMsg}`);
     }
 
+    // Server clock at response time (HTTP Date header, 1 s resolution), for
+    // callers that compare against server-side timestamps such as createdAt.
+    this.lastServerDate = response.headers.get('date') || null;
     return data;
   }
 }

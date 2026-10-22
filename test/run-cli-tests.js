@@ -875,6 +875,97 @@ section('Integration: login / logout against a local fake Dokploy');
 
 }
 
+section('Integration: deployment wait against a local fake Dokploy');
+{
+  // Fake API. Per ID, the newest deployment flips to its final status on the
+  // 3rd poll: "ok" -> done, "bad" -> error, "slow" never finishes, "flaky"
+  // answers 502 on its first poll, "late" adds a NEW deployment only from the
+  // 3rd poll on (like a push webhook), "none" has no deployments. Each ID must
+  // be requested on the matching route.
+  const portFile = path.join(TEST_CONFIG_DIR, 'wait-port');
+  const fakeSrc = `
+    const polls = {};
+    // Per-ID poll counters, so each case starts from poll 1. "late" creates its
+    // deployment on the 2nd poll, after wait has seen it absent, like a push
+    // webhook arriving a few seconds late. "racy" creates it while the very
+    // first request is being answered, the case an ID snapshot would exclude.
+    // "stale" only ever has the old deployment.
+    const createdAt = {};
+    const s = require('http').createServer((req, res) => {
+      const u = new URL(req.url, 'http://x');
+      const isCompose = u.searchParams.has('composeId');
+      if (u.pathname !== (isCompose ? '/api/deployment.allByCompose' : '/api/deployment.all')) { res.writeHead(404).end(); return; }
+      const id = u.searchParams.get('applicationId') || u.searchParams.get('composeId');
+      const n = polls[id] = (polls[id] || 0) + 1;
+      if (id === 'flaky' && n === 1) { res.writeHead(502).end('bad gateway'); return; }
+      const old = { deploymentId: 'old', status: 'done', createdAt: '2026-01-01T00:00:00Z', title: 'older' };
+      const finalOf = { ok: 'done', bad: 'error', flaky: 'done' };
+      let list;
+      if (id === 'none') list = [];
+      else if (id === 'stale') list = [old];
+      else if (id === 'late' || id === 'racy') {
+        const startAt = id === 'late' ? 2 : 1;
+        if (n >= startAt && !createdAt[id]) createdAt[id] = new Date().toISOString();
+        list = createdAt[id] ? [old, { deploymentId: 'new-' + id, status: n >= startAt + 2 ? 'done' : 'running', createdAt: createdAt[id] }] : [old];
+      } else list = [old, { deploymentId: 'new-' + id, status: n >= 3 ? (finalOf[id] || 'running') : 'running', createdAt: '2026-01-02T00:00:00Z', title: 'newest' }];
+      res.writeHead(200, { 'Content-Type': 'application/json', Date: new Date().toUTCString() });
+      res.end(JSON.stringify(list));
+    });
+    s.listen(0, '127.0.0.1', () => require('fs').writeFileSync(${JSON.stringify(portFile)}, String(s.address().port)));
+  `;
+  const fake = require('child_process').spawn('node', ['-e', fakeSrc], { stdio: 'ignore' });
+  process.on('exit', () => { try { fake.kill(); } catch { /* gone */ } });
+  const end = Date.now() + 10_000;
+  while (!fs.existsSync(portFile) && Date.now() < end) spawnSync('node', ['-e', 'setTimeout(()=>{},50)']);
+  const env = { DOKPLOY_BASE_URL: `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8')}/api`, DOKPLOY_API_KEY: 'k' };
+  const wait = (args) => spawnCli(['deployment', 'wait', '--interval', '1', ...args], env);
+
+  let rr = wait(['--applicationId', 'ok']);
+  const done = parseJsonOrFail(rr.stdout, 'wait done');
+  assert(rr.status === 0 && done?.deploymentId === 'new-ok' && done?.status === 'done', 'wait exits 0 with the newest deployment once it is done');
+  assert(/running/.test(rr.stderr) && /done/.test(rr.stderr), 'wait reports status changes on stderr');
+
+  rr = wait(['--composeId', 'bad']);
+  const failed = parseJsonOrFail(rr.stdout, 'wait error');
+  assert(rr.status === 3 && failed?.deploymentId === 'new-bad' && failed?.status === 'error', 'wait exits 3 and prints the failed deployment as JSON (compose route)');
+  assert(/readLogs --deploymentId new-bad/.test(rr.stderr), 'wait points to the build log on error');
+
+  rr = wait(['--applicationId', 'flaky']);
+  assert(rr.status === 0 && /poll failed, retrying/.test(rr.stderr), 'wait retries a transient 502 instead of giving up');
+
+  rr = wait(['--applicationId', 'stale']);
+  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'stale no --new')?.deploymentId === 'old', 'without --new, wait accepts the newest existing deployment');
+  rr = wait(['--applicationId', 'late', '--new']);
+  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'late --new')?.deploymentId === 'new-late', 'with --new, wait ignores existing deployments and waits for the next one');
+  rr = wait(['--applicationId', 'racy', '--new']);
+  assert(rr.status === 0 && parseJsonOrFail(rr.stdout, 'racy --new')?.deploymentId === 'new-racy', 'with --new, a deployment created during the first poll still counts');
+  rr = wait(['--applicationId', 'ok', '--timeout', '0.0333']);
+  assert(rr.status === 0, 'a fractional --timeout does not break the request timeout');
+
+  const t0 = Date.now();
+  rr = wait(['--applicationId', 'slow', '--timeout', '0.05']);
+  assert(rr.status === 4 && /Still running/.test(rr.stderr), 'wait exits 4 on timeout');
+  assert(Date.now() - t0 < 10_000, 'timeout is not stretched by the polling interval');
+  rr = wait(['--applicationId', 'none', '--new', '--timeout', '0.05']);
+  assert(rr.status === 4 && /No new deployment appeared/.test(rr.stderr), 'wait --new times out when nothing new starts');
+
+  rr = spawnCli(['deployment', 'wait'], env);
+  assert(rr.status === 1 && /exactly one of --applicationId or --composeId/.test(rr.stderr), 'wait requires one target');
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok', '--bogus', 'x'], env);
+  assert(rr.status === 1 && /Unknown flag/.test(rr.stderr), 'wait rejects unknown flags');
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok', '--timeout', 'Infinity'], env);
+  assert(rr.status === 1 && /--timeout must be a number/.test(rr.stderr), 'wait rejects a non-finite timeout');
+  rr = spawnCli(['deployment'], env);
+  assert(rr.status === 0 && /wait\s+\(client-side/.test(rr.stdout), 'deployment domain help lists wait');
+  rr = spawnCli(['deployment', 'wait', '--help']);
+  assert(rr.status === 0 && /Usage: dokploy deployment wait/.test(rr.stdout), 'wait --help works before login');
+  rr = spawnCli([]);
+  assert(/--composeId ID/.test(rr.stdout), 'top help shows the compose form of wait');
+  rr = spawnCli(['deployment', 'wait', '--applicationId', 'ok']);
+  assert(rr.status === 1 && /Not logged in/.test(rr.stderr), 'wait without auth exits 1');
+  fake.kill();
+}
+
 // --- Summary -----------------------------------------------------------------
 
 console.log('\n' + '='.repeat(50));

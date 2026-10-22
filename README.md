@@ -141,6 +141,15 @@ dokploy login --name main    --url https://dokploy-a --default   # switch the de
 dokploy logout --name staging                                    # or `dokploy logout` for all
 ```
 
+Waiting for a deploy is one command, so agents need no shell loop:
+
+```bash
+dokploy application deploy --applicationId app_...
+dokploy deployment wait --applicationId app_...   # exit 0 done, 3 error/cancelled, 4 timeout
+```
+
+After a `git push` that auto-deploys, run `dokploy deployment wait --applicationId app_... --new` right after the push. It skips deployments created before its first server response (about 1 s margin), so it usually picks the deployment the push starts. It is best effort: a slow first response can exclude that deployment (exit 4), and a deployment created within the margin can be picked instead. Check that the returned `title` matches your commit, and run plain `wait` if it exits 4 or does not match.
+
 Env vars still work and override the saved login, which suits CI and `direnv`:
 
 ```bash
