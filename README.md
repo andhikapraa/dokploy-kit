@@ -148,7 +148,7 @@ dokploy application deploy --applicationId app_...
 dokploy deployment wait --applicationId app_...   # exit 0 done, 3 error/cancelled, 4 timeout
 ```
 
-After a `git push` that auto-deploys, run `dokploy deployment wait --applicationId app_... --new` right after the push. It counts only deployments created no more than about a second before it started (on the server's clock), so it waits for the one the push starts rather than the previous one. If the push's deployment was already created before `wait --new` started, it is not counted and the command times out with exit 4; run plain `wait` in that case.
+After a `git push` that auto-deploys, run `dokploy deployment wait --applicationId app_... --new` right after the push. It skips deployments created before its first server response (about 1 s margin), so it usually picks the deployment the push starts. It is best effort: a slow first response can exclude that deployment (exit 4), and a deployment created within the margin can be picked instead. Check that the returned `title` matches your commit, and run plain `wait` if it exits 4 or does not match.
 
 Env vars still work and override the saved login, which suits CI and `direnv`:
 
